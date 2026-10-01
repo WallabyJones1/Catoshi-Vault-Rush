@@ -9,7 +9,7 @@ const {dailyQuest,syncHolderScores,publicRun,RUN_FIELDS}=require('./quest.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const ROUND_MS=86400000,GRACE_MS=660000;
-const HOLDER_DAILY_RUNS=10;
+const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['engine.js','text/javascript'],
   ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],
@@ -113,7 +113,7 @@ function createApp(config,options={}) {
   }
   function holderQuota(wallet,round=Math.floor(now()/ROUND_MS)){
     const used=db.prepare('SELECT used FROM holder_attempts WHERE wallet=? AND round=?').get(wallet,round)?.used||0;
-    return {limit:HOLDER_DAILY_RUNS,used,remaining:Math.max(0,HOLDER_DAILY_RUNS-used),resetsAt:(round+1)*ROUND_MS};
+    return {limit:null,used,remaining:null,unlimited:true,resetsAt:(round+1)*ROUND_MS};
   }
   function holderBest(wallet,round=Math.floor(now()/ROUND_MS)){
     const run=db.prepare(`SELECT ${RUN_FIELDS} FROM runs WHERE wallet=? AND mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY score DESC,submitted ASC,id ASC LIMIT 1`).get(wallet,round);
@@ -164,7 +164,7 @@ function createApp(config,options={}) {
           const round=Math.floor(now()/ROUND_MS);
           const snapshot=ensureRound(db,round,config,ROUND_MS);
           const rewards=publicRewards(snapshot,config);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:50000,holderDailyRuns:HOLDER_DAILY_RUNS,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-wallet',redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode=url.searchParams.get('mode')==='holder'?'holder':'practice';
@@ -172,14 +172,11 @@ function createApp(config,options={}) {
           if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
           json(res,{mode,round,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
         }
-        if(req.method==='GET'&&url.pathname==='/api/balance'){
-          const user=session(req,res);rate(req,'balance',12,user.id);
-          const address=walletAddress(url.searchParams.get('wallet')),value=await balance(address);
-          json(res,{wallet:address,tokens:typeof value.raw==='bigint'?fromRaw(value.raw,value.decimals):value.whole,eligible:value.eligible,minimumTokens:50000,...holderStatus(address),checkedAt:now()});return;
-        }
-        if(req.method==='GET'&&url.pathname==='/api/holder-status'){
-          const wallet=walletAddress(url.searchParams.get('wallet'));
-          json(res,holderStatus(wallet));return;
+        if(req.method==='GET'&&['/api/player-status','/api/holder-status','/api/balance'].includes(url.pathname)){
+          const address=walletAddress(url.searchParams.get('wallet'));
+          // Validate a public reward address only. Entry/progress never depend
+          // on token ownership or on the availability of a Solana RPC.
+          json(res,{...holderStatus(address),eligible:true,minimumTokens:0,checkedAt:now()});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/vault'){
           if(!config.vault){json(res,{configured:false,payoutMode:'manual-review'});return;}
@@ -199,33 +196,26 @@ function createApp(config,options={}) {
         }
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
-        if(url.pathname==='/api/balance'){
-          rate(req,'balance',12,user.id);const address=walletAddress(data.wallet),value=await balance(address);
-          json(res,{wallet:address,tokens:typeof value.raw==='bigint'?fromRaw(value.raw,value.decimals):value.whole,eligible:value.eligible,minimumTokens:50000,...holderStatus(address),checkedAt:now()});return;
+        if(['/api/entry','/api/balance'].includes(url.pathname)){
+          const address=walletAddress(data.wallet);
+          json(res,{...holderStatus(address),eligible:true,minimumTokens:0,checkedAt:now()});return;
         }
         if(url.pathname==='/api/runs/start'){
-          rate(req,'starts',12,user.id);
+          rate(req,'starts',60,user.id);
           const mode=data.mode==='holder'?'holder':'practice';const name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
-          // Entry checks holdings only. The saved address is the reward recipient,
-          // never a claim of ownership or permission to spend from that wallet.
+          // Legacy mode 'holder' stores all daily prize entries so existing
+          // scores and reward records remain intact. No holdings are required.
           const rewardWallet=mode==='holder'?walletAddress(data.wallet):null;
-          if(rewardWallet){
-            if(holderQuota(rewardWallet).remaining===0)throw new HttpError(429,'All 10 holder runs used today. Resets at 00:00 UTC. Your best run stays on the board; practice is unlimited.');
-            const value=await balance(rewardWallet);
-            if(!value.eligible)throw new HttpError(403,'At least 50,000 CATOSHI is required for the holder board.');
-          }
-          if(db.prepare('SELECT COUNT(*) count FROM runs WHERE session=? AND started>?').get(user.id,now()-3600000).count>=120)throw new HttpError(429,'Hourly run limit reached.');
           const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
           ensureRound(db,round,config,ROUND_MS);
-          // A durable counter survives abandonment cleanup, new sessions and
-          // restarts. Reserve an attempt and its ticket in one transaction.
+          // Record starts for daily progress only, without any play limit.
+          // Keep the durable counter and ticket in one transaction.
           db.exec('BEGIN IMMEDIATE');
           try{
             if(rewardWallet){
               db.prepare('INSERT OR IGNORE INTO holder_attempts(wallet,round,used)VALUES(?,?,0)').run(rewardWallet,round);
-              const reserved=db.prepare('UPDATE holder_attempts SET used=used+1 WHERE wallet=? AND round=? AND used<?').run(rewardWallet,round,HOLDER_DAILY_RUNS);
-              if(reserved.changes!==1)throw new HttpError(429,'All 10 holder runs used today. Resets at 00:00 UTC; practice is unlimited.');
+              db.prepare('UPDATE holder_attempts SET used=used+1 WHERE wallet=? AND round=?').run(rewardWallet,round);
             }
             db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
             db.exec('COMMIT');
@@ -233,7 +223,7 @@ function createApp(config,options={}) {
           json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS,...(rewardWallet?{...holderStatus(rewardWallet,round)}:{})});return;
         }
         if(url.pathname==='/api/runs/finish'){
-          rate(req,'finishes',12,user.id);
+          rate(req,'finishes',60,user.id);
           const saved=db.prepare('SELECT * FROM runs WHERE id=? AND session=?').get(String(data.id||''),user.id);
           if(!saved)throw new HttpError(404,'Run not found.');
           if(saved.submitted!==null){json(res,ownResult(saved,req,{duplicate:true}));return;}
@@ -265,7 +255,7 @@ function createApp(config,options={}) {
         const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
         if(!run)throw new HttpError(404,'Score not found.');
         const title=escapeHtml(`${run.name} scored ${run.score.toLocaleString()} in Catoshi Vault Rush`);
-        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?'prize':'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
         filename='index.html';
       }
       if(!STATIC_FILES.has(filename))throw new HttpError(404,'Not found.');

@@ -66,19 +66,19 @@
     phase = 'loading'; practice = isPractice;
     ui['pause-panel'].hidden = true; ui.warning.hidden = true;
     ui.trick.classList.remove('visible'); ui.trick.textContent = '';
-    ui['mode-label'].textContent = practice ? 'PRACTICE' : 'HOLDER RUN';
+    ui['mode-label'].textContent = practice ? 'PRACTICE' : 'PRIZE RUN';
     ui.countdown.textContent = 'LOADING';
     show('game-screen'); resizeGame(); drawLoading();
     try {
       if (!ctx || typeof VaultRush === 'undefined' || typeof VaultRushRenderer === 'undefined') throw new Error('Game unavailable');
-      // Failed artwork must not spend one of a holder's daily attempts.
+      // Load artwork before reserving a scored run ticket.
       const images=await artworkReady();
       if(operation!==startId)return;
       const onlineTicket=await window.RushOnline.prepare(isPractice);
       if (operation !== startId) return;
       setRunTicket(onlineTicket);
       if(onlineTicket?.wallet)wallet=onlineTicket.wallet;
-      ui['mode-label'].textContent=practice?(onlineTicket?'PRACTICE':'LOCAL PRACTICE · NO LEADERBOARD'):'HOLDER RUN';
+      ui['mode-label'].textContent=practice?(onlineTicket?'PRACTICE':'LOCAL PRACTICE · NO LEADERBOARD'):'PRIZE RUN';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = new VaultRush.Run(onlineTicket?.seed||Date.now()); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       sound.setPlaying(true);
@@ -137,9 +137,9 @@
     ui['final-score'].textContent = Math.floor(run.score).toLocaleString();
     ui['final-coins'].textContent = run.coins;
     $('personal-best').textContent='';
-    $('result-quest').textContent=practice?'Practice collectibles do not count toward the daily holder quest.':'Checking daily quest…';
+    $('result-quest').textContent=practice?'Practice collectibles do not count toward the daily quest.':'Checking daily quest…';
     $('run-pickups').textContent=run.redTokens+' RED RUSH · '+run.rushPickups+' SPEED BURST'+(run.rushPickups===1?'':'S');
-    ui['result-kicker'].textContent = practice ? 'PRACTICE RUN' : 'DAILY HOLDER RUN';
+    ui['result-kicker'].textContent = practice ? 'PRACTICE RUN' : 'DAILY PRIZE RUN';
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
     ui['result-copy'].textContent = practice
       ? 'Practice runs do not earn token rewards.'
@@ -219,7 +219,7 @@
     element.addEventListener('contextmenu',event => event.preventDefault());
   }
 
-  // Holder entry needs a balance check only; rewards are bound to the pasted address.
+  // Prize entry is free; rewards are bound to the pasted public address.
   $('practice-button').addEventListener('click',() => begin(true));
   $('again').addEventListener('click',() => begin(practice));
   $('change-wallet').addEventListener('click',backToMenu);
@@ -252,25 +252,13 @@
     const address = $('wallet').value.trim();
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) { status('That does not look like a Solana wallet.','error'); return; }
     const request = ++walletRequest;
-    ui['verify-button'].disabled = true; status('Checking CATOSHI balance…');
+    ui['verify-button'].disabled = true; status('Starting your free prize run…');
     try {
-      const balance = await window.RushOnline.balance(address);
       if (request !== walletRequest || phase !== 'menu') return;
-      if (!balance.eligible) {
-        status(Number(balance.tokens).toLocaleString() + ' CATOSHI found — 50,000 required. Practice is always available.','error');
-        return;
-      }
       wallet=address;window.RushOnline.setWallet(address);
-      if(balance.quota?.remaining===0){
-        status('All 10 holder runs used today. Your best run stays on the board. Resets at 00:00 UTC; practice is unlimited.','error');
-        return;
-      }
-      wallet=address;
-      window.RushOnline.setWallet(address);
-      status(Number(balance.tokens).toLocaleString()+' CATOSHI confirmed. Starting your holder run…','success');
       await begin(false);
     } catch (error) {
-      if (request === walletRequest && phase === 'menu') status(error.message||'Token check unavailable. Retry shortly or play practice.','error');
+      if (request === walletRequest && phase === 'menu') status(error.message||'Could not start this run. Retry shortly or play practice.','error');
     } finally { if (request === walletRequest) ui['verify-button'].disabled = false; }
   });
 })();

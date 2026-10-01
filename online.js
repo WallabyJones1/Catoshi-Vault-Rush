@@ -29,8 +29,8 @@
       const pool=rewards?tokenText(rewards.catoshiPool)+' CATOSHI'+(Number(rewards.rushPool)>0?' + '+tokenText(rewards.rushPool)+' RUSH':''):value.jackpotTokens+' CATOSHI';
       $('prize-pool').textContent=value.prizesEnabled?pool:'REWARDS OFF';
       $('reward-rule').textContent=value.prizesEnabled
-        ?'Daily top 10 holder wallets · '+(rewards?.split||[30,20,12,10,8,6,5,4,3,2]).join(' / ')+'% · team reviews payouts'
-        :'Free holder play · daily prizes can be enabled by the team';
+        ?'Daily top 10 wallets · '+(rewards?.split||[30,20,12,10,8,6,5,4,3,2]).join(' / ')+'% · team reviews payouts'
+        :'Free play for everyone · daily prizes can be enabled by the team';
       refreshVault();
       if(!vaultTimer)vaultTimer=setInterval(()=>{if(!document.hidden){refreshVault();refreshQuota();}},30000);
       return value;
@@ -43,9 +43,8 @@
   }
   function updateQuota(quota){
     if(!quota)return;
-    $('holder-runs').textContent=quota.remaining+' OF '+quota.limit+' RUNS LEFT · BEST SCORE COUNTS';
-    $('again').disabled=lastMode==='holder'&&quota.remaining===0;
-    $('again').textContent=$('again').disabled?'DAILY RUNS USED':'RIDE AGAIN';
+    $('holder-runs').textContent=quota.used+' RUN'+(quota.used===1?'':'S')+' TODAY · UNLIMITED PLAYS · BEST SCORE COUNTS';
+    $('again').disabled=false;$('again').textContent='RIDE AGAIN';
   }
   function updateBest(best){
     $('holder-best').textContent=best?'BEST TODAY · '+best.score.toLocaleString()+' POINTS'+(best.pointsMultiplier===2?' · 2× QUEST':'')+(best.rank?' · #'+best.rank:''):'';
@@ -61,9 +60,9 @@
     const history=$('daily-history');history.textContent='';
     for(const [index,run]of (value.history||[]).entries()){
       const li=document.createElement('li'),line=document.createElement('div'),label=document.createElement('span'),score=document.createElement('strong'),detail=document.createElement('small');
-      line.className='history-line';label.textContent='RUN '+((value.history||[]).length-index)+' · '+run.status.toUpperCase();
+      line.className='history-line';label.textContent='RUN '+((value.quota?.used||(value.history||[]).length)-index)+' · '+run.status.toUpperCase();
       score.textContent=run.submitted!==null?run.score.toLocaleString()+(run.pointsMultiplier===2?' · 2×':''):'—';
-      detail.className='history-detail';detail.textContent=run.submitted!==null?run.name+' · '+run.distance+'m · '+run.redTokens+' red · '+run.rushPickups+' burst'+(run.rushPickups===1?'':'s'):'Each start counts toward the daily 10-run limit.';
+      detail.className='history-detail';detail.textContent=run.submitted!==null?run.name+' · '+run.distance+'m · '+run.redTokens+' red · '+run.rushPickups+' burst'+(run.rushPickups===1?'':'s'):'Unlimited plays. Complete the run to post a checked score.';
       line.appendChild(label);line.appendChild(score);li.appendChild(line);li.appendChild(detail);history.appendChild(li);
     }
     $('history-empty').hidden=Boolean(value.history?.length);
@@ -72,7 +71,7 @@
   async function refreshQuota(){
     if(!entryWallet)return;
     const address=entryWallet;
-    try{const value=await api('holder-status?'+new URLSearchParams({wallet:address}));if(address===entryWallet){updateStatus(value);}}catch{}
+    try{const value=await api('player-status?'+new URLSearchParams({wallet:address}));if(address===entryWallet){updateStatus(value);}}catch{}
   }
   async function refreshVault(){
     try{
@@ -97,7 +96,7 @@
     try{localStorage.setItem('rush-holder-name:'+address,value);}catch{}
     $('holder-name').value=value;suggestedHolderName=value;
   }
-  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='10 RUNS A DAY · BEST SCORE COUNTS';updateBest(null);$('holder-daily').hidden=true;}});
+  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='UNLIMITED PLAYS · BEST SCORE COUNTS';updateBest(null);$('holder-daily').hidden=true;}});
   $('wallet').addEventListener('change',()=>restoreHolderName());
   restoreHolderName();
   function name(practice){return (!practice?$('holder-name').value.trim():'')||$('player-name').value.trim()||'Runner';}
@@ -125,7 +124,7 @@
       const result=await api('runs/finish',{id:ticket.id,ticks,inputs});
       if(generation!==submissionGeneration)return null;
       lastResult=result;updateStatus(result.daily||result);
-      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · '+(ticket.mode==='holder'?'daily holder board':'practice board');
+      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · '+(ticket.mode==='holder'?'daily prize board':'practice board');
       const dayLabel=result.daily&&result.daily.round!==result.run.round?'PREVIOUS UTC DAY':'TODAY';
       $('personal-best').textContent=ticket.mode==='holder'&&result.best
         ?(result.best.id===result.run.id?'BEST RUN ':'YOUR BEST ')+dayLabel+' · '+result.best.score.toLocaleString()+' POINTS'+(result.best.rank?' · #'+result.best.rank:'')
@@ -141,7 +140,7 @@
   function share(run,practice,result){
     const checked=result?.run;
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
-    const kind=checked?checked.mode+' run':'local practice';
+    const kind=checked?(checked.mode==='holder'?'prize run':'practice run'):'local practice';
     const text=`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
     const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/':'');
     $('share-x').href='https://twitter.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});
@@ -176,7 +175,7 @@
         ?'Updated '+new Date(value.updatedAt).toLocaleTimeString()+' · best run per player'
         :'No scores yet. Be the first to finish a run.';
       $('leaderboard-explainer').textContent=boardMode==='holder'
-        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · 10 runs per wallet · best score counts · collect 10 red RUSH for 2× · top 10 share enabled prizes after team review.'
+        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · unlimited plays per wallet · best score counts · collect 10 red RUSH for 2× · top 10 share enabled prizes after team review.'
         :'All-time practice · no token rewards. Names are public; duplicate names are possible.';
       const remaining=Math.max(0,(value.round+1)*86400000-value.updatedAt);
       $('board-round-time').textContent=mode!=='holder'?'BEST COMPLETED PRACTICE RUNS':round!==null?'PREVIOUS UTC DAY · CLOSED'
@@ -216,14 +215,13 @@
     const address=$('wallet').value.trim(),button=$('check-day');
     button.disabled=true;$('wallet-status').textContent='Checking your daily progress…';
     try{
-      const value=await api('balance?'+new URLSearchParams({wallet:address}),null,15000);
+      const value=await api('player-status?'+new URLSearchParams({wallet:address}),null,15000);
       if($('wallet').value.trim()!==address)return;
-      if(!value.eligible)throw Error('At least 50,000 CATOSHI required. Practice is available.');
       entryWallet=address;restoreHolderName(address);updateStatus(value);
       $('wallet-status').textContent='Daily progress loaded · no run used.';$('wallet-status').className='status success';
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}
   });
-  window.RushOnline={prepare,submit,share,getConfig,balance:async wallet=>{const value=await api('balance?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();restoreHolderName(entryWallet);},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,share,getConfig,progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();restoreHolderName(entryWallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();

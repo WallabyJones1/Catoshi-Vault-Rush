@@ -40,43 +40,32 @@ async function harness(t,{durable=false,balance}={}){
   return h;
 }
 
-test('ten daily wallet starts survive abandonment cleanup, sessions and restarts; UTC reset restores entry',async t=>{
-  const h=await harness(t,{durable:true});
-  const rules=(await h.request('/api/config')).value;assert.equal(rules.holderDailyRuns,10);assert(!('shareBonus' in rules));
-  for(let i=0;i<10;i++){
-    const result=await h.start('holder',WALLET,'Holder '+i,i<5?'first':'second');
-    assert.equal(result.status,200);assert.equal(result.value.quota.used,i+1);assert.equal(result.value.quota.remaining,9-i);
+test('free wallet entry has no daily or hourly quota, survives restarts and resets only progress at UTC midnight',async t=>{
+  let calls=0;const h=await harness(t,{durable:true,balance:async()=>{calls++;throw Error('RPC offline');}});
+  const rules=(await h.request('/api/config')).value;assert.equal(rules.holderDailyRuns,null);assert.equal(rules.minimumTokens,0);assert(rules.unlimitedPlays);assert(!('shareBonus' in rules));
+  for(let i=0;i<151;i++){
+    h.clock+=2000;
+    const result=await h.start('holder',WALLET,'Free Cat '+i);
+    assert.equal(result.status,200,'start '+(i+1));assert.equal(result.value.quota.used,i+1);assert.equal(result.value.quota.remaining,null);assert(result.value.quota.unlimited);
   }
-  const denied=await h.start('holder',WALLET,'Eleventh','third');assert.equal(denied.status,429);assert.match(denied.value.error,/10 holder runs/);
-  const balance=(await h.request('/api/balance?wallet='+WALLET)).value;assert(balance.eligible);assert.equal(balance.quota.remaining,0);
-  h.clock+=3*3600000;await h.request('/health');assert.equal(h.app.db.prepare('SELECT COUNT(*) count FROM runs').get().count,10,'holder tickets remain visible as expired attempts in daily history');
-  await h.restart();assert.equal((await h.start('holder',WALLET,'Fresh browser','fresh')).status,429,'the durable attempt counter is independent of run cleanup');
-  assert.equal((await h.start('practice')).status,200,'practice remains available after all holder attempts');
-  assert.equal((await h.start('holder',MINT,'Different wallet')).value.quota.remaining,9);
+  const status=(await h.request('/api/player-status?wallet='+WALLET)).value;assert(status.eligible);assert.equal(status.quota.used,151);assert.equal(status.history.length,10,'recent history is a window, not a run cap');
+  await h.restart();assert.equal((await h.start()).status,200,'existing counters do not restrict a fresh session');
+  assert.equal((await h.request('/api/player-status?wallet='+WALLET)).value.quota.used,152);assert.equal(calls,0,'no token RPC for entry');
   const oldRound=Math.floor(h.clock/ROUND_MS);h.clock=(oldRound+1)*ROUND_MS+1;
-  const next=await h.start();assert.equal(next.status,200);assert.equal(next.value.quota.remaining,9);
+  const next=await h.start();assert.equal(next.status,200);assert.equal(next.value.quota.used,1);assert.equal(next.value.quota.remaining,null);
   assert.equal(next.value.quota.resetsAt,(oldRound+2)*ROUND_MS);
 });
 
-test('concurrent starts cannot exceed ten; failed balance checks do not consume attempts',async t=>{
-  let broken=false;
-  const h=await harness(t,{balance:async wallet=>{
-    await new Promise(resolve=>setTimeout(resolve,5));
-    if(broken)throw Object.assign(Error('Balance unavailable'),{status:503});
-    return {raw:50000000000n,decimals:6,whole:'50000',eligible:wallet!==MINT};
-  }});
+test('concurrent free starts accept zero holdings and unavailable RPCs; addresses still validate',async t=>{
+  let calls=0;const h=await harness(t,{balance:async()=>{calls++;throw Error('RPC unavailable');}});
   assert.equal((await h.start('holder','invalid','Bad address','bad')).status,400);
-  assert.equal((await h.start('holder',MINT,'Low holdings','low')).status,403);
-  assert.equal((await h.request('/api/holder-status?wallet='+MINT)).value.quota.used,0);
-  broken=true;assert.equal((await h.start('holder',WALLET,'RPC failure','fail')).status,503);broken=false;
-  assert.equal((await h.request('/api/holder-status?wallet='+WALLET)).value.quota.used,0);
-  // Warm a session so all concurrent calls share its cookie.
-  await h.request('/api/balance?wallet='+WALLET);
+  assert.equal((await h.start('holder',MINT,'No holdings','low')).status,200);
+  await h.request('/api/player-status?wallet='+WALLET);
   const results=await Promise.all(Array.from({length:12},(_,i)=>h.start('holder',WALLET,'Run '+i)));
-  assert.equal(results.filter(result=>result.status===200).length,10);
-  assert.equal(results.filter(result=>result.status===429).length,2);
-  assert.equal(h.app.db.prepare('SELECT used FROM holder_attempts WHERE wallet=?').get(WALLET).used,10);
-  assert.equal(h.app.db.prepare('SELECT COUNT(*) count FROM runs WHERE wallet=?').get(WALLET).count,10);
+  assert.equal(results.filter(result=>result.status===200).length,12);
+  assert.equal(h.app.db.prepare('SELECT used FROM holder_attempts WHERE wallet=?').get(WALLET).used,12);
+  assert.equal(h.app.db.prepare('SELECT COUNT(*) count FROM runs WHERE wallet=?').get(WALLET).count,12);assert.equal(calls,0);
+  assert.equal((await h.request('/api/entry',{wallet:'invalid'})).status,400);
 });
 
 test('existing SQLite data migrates without losing scores or available attempt counts',()=>{
@@ -101,7 +90,7 @@ test('leaderboard publishes one best completed run per holder wallet, preserving
   const best=results.slice().sort((a,b)=>b.run.score-a.run.score||a.run.submitted-b.run.submitted||a.run.id.localeCompare(b.run.id))[0];
   assert.equal(ranked.length,1);assert.equal(ranked[0].id,best.run.id);assert.equal(ranked[0].name,best.run.name);
   assert(!('shareMultiplier' in ranked[0]));
-  assert.equal((await h.request('/api/holder-status?wallet='+WALLET)).value.quota.remaining,6);
+  assert.equal((await h.request('/api/holder-status?wallet='+WALLET)).value.quota.remaining,null);
 });
 
 
@@ -123,12 +112,12 @@ test('completed native red pickups accumulate once across ten runs, unlock the b
  }
  const status=(await h.request('/api/holder-status?wallet='+WALLET)).value;
  assert.equal(status.best.id,results[0].run.id);assert.equal(status.best.score,rawScore*2);assert.equal(status.best.pointsMultiplier,2);
- assert.equal(status.history.length,10);assert.equal(status.quota.remaining,0);assert.equal(status.quest.collected,10);
+ assert.equal(status.history.length,10);assert.equal(status.quota.remaining,null);assert.equal(status.quest.collected,10);
  assert.equal(status.history.filter(r=>r.pointsMultiplier===2).length,1);assert(status.history.every(r=>r.status==='completed'));
  assert(!JSON.stringify(status).includes('inputs'),'history never exposes recordings');
  await h.restart();assert.equal((await h.request('/api/holder-status?wallet='+WALLET)).value.quest.collected,10);
  h.clock=(Math.floor(h.clock/ROUND_MS)+1)*ROUND_MS+1;
- const reset=(await h.request('/api/holder-status?wallet='+WALLET)).value;assert.equal(reset.quest.collected,0);assert.equal(reset.quota.remaining,10);assert.equal(reset.history.length,0);assert.equal(reset.best,null);
+ const reset=(await h.request('/api/holder-status?wallet='+WALLET)).value;assert.equal(reset.quest.collected,0);assert.equal(reset.quota.remaining,null);assert.equal(reset.history.length,0);assert.equal(reset.best,null);
 });
 
 test('daily progress loads without spending a run and renders history, quest and best-score badges as text',async()=>{
@@ -140,11 +129,12 @@ test('daily progress loads without spending a run and renders history, quest and
  const get=id=>{if(!elements.has(id))elements.set(id,new Element());return elements.get(id);};
  const document={getElementById:get,createElement:()=>new Element(),addEventListener(){},hidden:false};
  const best={id:'best',name:'<Cat>',score:2000,rawScore:1000,pointsMultiplier:2,distance:1000,redTokens:2,rushPickups:1,submitted:10,rank:1};
- const status={wallet:WALLET,round:5,quota:{limit:10,used:4,remaining:6},quest:{collected:10,target:10,remaining:0,unlocked:true},best,history:[{...best,status:'completed'},{id:'open',score:null,submitted:null,status:'in progress'}]};
+ const status={wallet:WALLET,round:5,quota:{limit:null,used:4,remaining:null,unlimited:true},quest:{collected:10,target:10,remaining:0,unlocked:true},best,history:[{...best,status:'completed'},{id:'open',score:null,submitted:null,status:'in progress'}]};
  const requests=[],window={};get('wallet').value=WALLET;
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{document,window,location:{protocol:'file:'},localStorage:{getItem(){return null;},setItem(){}},fetch:async route=>{requests.push(route);return {ok:true,json:async()=>({...status,eligible:true,tokens:'50000'})};},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},URLSearchParams,console});
  await get('check-day').listeners.click();
- assert.deepEqual(requests,['/api/balance?wallet='+WALLET]);assert.equal(window.RushOnline.wallet(),WALLET);
+ assert.deepEqual(requests,['/api/player-status?wallet='+WALLET]);assert.equal(window.RushOnline.wallet(),WALLET);
+ assert.match(get('holder-runs').textContent,/UNLIMITED PLAYS/);assert.equal(get('again').disabled,false);
  assert.equal(get('quest-count').textContent,'10 / 10 · 2×');assert.equal(get('quest-progress').value,10);assert.equal(get('holder-daily').hidden,false);
  assert.equal(get('daily-history').children.length,2);assert.match(get('holder-best').textContent,/2× QUEST/);
  assert.match(get('daily-history').children[0].children[1].textContent,/<Cat> · 1000m · 2 red/,'names are rendered literally, never as HTML');

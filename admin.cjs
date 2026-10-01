@@ -14,9 +14,8 @@ async function makePlan(db,roundId,config,dependencies={}) {
   if(prior)return prior;
   if(db.prepare('SELECT round FROM reward_plans WHERE round=?').get(roundId))throw Error('A top-10 plan already exists for this round.');
   const winner=db.prepare("SELECT * FROM runs WHERE round=? AND mode='holder' AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY score DESC,submitted ASC,id ASC LIMIT 1").get(roundId);
-  if(!winner)throw Error('No eligible holder run in this round.');
+  if(!winner)throw Error('No eligible prize run in this round.');
   if(winner.wallet===round.vault)throw Error('Winner and vault cannot be the same wallet. Review the round manually.');
-  const holdings=await balance(winner.wallet);if(!holdings.eligible)throw Error('Winner no longer holds 50,000 CATOSHI. Review your published rules before taking any action.');
   const treasury=await balance(round.vault),raw=BigInt(round.tokens)*10n**BigInt(treasury.decimals);
   const reserved=[...db.prepare("SELECT raw FROM payouts WHERE vault=? AND status='review'").all(round.vault),...db.prepare("SELECT raw FROM reward_payments WHERE vault=? AND mint=? AND status='review'").all(round.vault,MINT)].reduce((sum,plan)=>sum+BigInt(plan.raw),0n);
   if(treasury.raw<raw+reserved)throw Error('Vault has insufficient unreserved CATOSHI. No payout plan created.');

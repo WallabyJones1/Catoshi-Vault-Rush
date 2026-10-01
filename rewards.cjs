@@ -67,11 +67,9 @@ async function makeTop10Plan(db,roundId,config,dependencies={}){
   if(db.prepare('SELECT round FROM payouts WHERE round=?').get(roundId))throw Error('A legacy payout plan already exists for this round; do not pay it twice.');
   const prior=planSummary(db,roundId);if(prior)return prior;
   const winners=db.prepare(`SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY wallet ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL AND wallet IS NOT NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 10`).all(roundId);
-  if(!winners.length)throw Error('No eligible holder runs in this round.');
+  if(!winners.length)throw Error('No eligible prize runs in this round.');
   if(winners.some(w=>w.wallet===row.vault))throw Error('A winning address is the vault. Review and disqualify that entry before preparing payments.');
   const getBalance=dependencies.balance||((wallet,mint)=>tokenBalance(wallet,[config.rpc,config.rpcFallback].filter(Boolean),undefined,mint));
-  const holdings=await Promise.all(winners.map(w=>getBalance(w.wallet,MINT)));
-  if(holdings.some(value=>!value.eligible))throw Error('A winner no longer holds 50,000 CATOSHI. Review that entry before preparing payments.');
   const assets=[...(positive(row.tokens)?[{symbol:'CATOSHI',mint:MINT,tokens:row.tokens}]:[]),...(positive(row.rush_tokens)?[{symbol:'RUSH',mint:row.rush_mint,tokens:row.rush_tokens}]:[])];
   const weights=JSON.parse(row.splits).slice(0,winners.length),total=weights.reduce((a,b)=>a+b,0);
   const payments=[],checks=[];
