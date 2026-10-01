@@ -208,19 +208,29 @@ test('practice starts locally after a working config but failed start API; holde
   const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element(m[1])]));
   const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
   let startsFail=true;const requests=[];
+  const storedNames=new Map();
   const fetcher=async(url,options)=>{
     requests.push([url,options.body?JSON.parse(options.body):null]);
     const value=url.endsWith('/config')?{engine:security.ENGINE_VERSION,vault:security.MINT,prizesEnabled:true,rewards:{catoshiPool:'100000',rushPool:'50'}}:url.endsWith('/vault')?{configured:true,tokens:'1234567.89',assets:[{symbol:'CATOSHI',available:true,tokens:'1234567.89'},{symbol:'RUSH',available:true,tokens:'42.5'}]}:url.endsWith('/runs/start')?{id:'test',wallet:security.MINT}:{eligible:true,tokens:'50000'};
     return {ok:!(startsFail&&url.endsWith('/runs/start')),json:async()=>startsFail&&url.endsWith('/runs/start')?{error:'Unavailable'}:value};
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},location:{protocol:'file:'},URLSearchParams,console});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,localStorage:{getItem:key=>storedNames.get(key),setItem:(key,value)=>storedNames.set(key,value)},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},location:{protocol:'file:'},URLSearchParams,console});
   assert.equal(await window.RushOnline.prepare(true),null,'API failure must not block practice');
   assert.match(elements['practice-note'].textContent,/Local practice/);
   assert.equal(elements['vault-balance'].textContent,'1,234,567.89');
   assert.equal(elements['prize-pool'].textContent,'100,000 CATOSHI + 50 RUSH');
+  elements['player-name'].value='Practice Cat';
+  elements['holder-name'].value='Wallaby';
   startsFail=false;window.RushOnline.setWallet(security.MINT);
   const holder=await window.RushOnline.prepare(false);assert.equal(holder.wallet,security.MINT);
   assert.equal(requests.at(-1)[1].wallet,security.MINT);assert.equal(requests.at(-1)[1].mode,'holder');
+  assert.equal(requests.at(-1)[1].name,'Wallaby','holder entry uses its dedicated name, not the practice name');
+  assert.equal(storedNames.get('rush-holder-name:'+security.MINT),'Wallaby');
+  const second=encode58(Buffer.alloc(32,9));storedNames.set('rush-holder-name:'+second,'Second Cat');
+  elements.wallet.value=second;await elements.wallet.dispatch('input');assert.equal(elements['holder-name'].value,'Second Cat','changing wallet restores its own saved name');
+  elements.wallet.value=security.MINT;await elements.wallet.dispatch('input');assert.equal(elements['holder-name'].value,'Wallaby');
+  elements['holder-name'].value='New Name';await elements.wallet.dispatch('change');assert.equal(elements['holder-name'].value,'New Name','autofill must preserve manual edits');
+  await window.RushOnline.prepare(true);assert.equal(requests.at(-1)[1].name,'Practice Cat','practice keeps its own name');
   assert(!requests.some(([url])=>url.includes('/auth/')),'no connection or signature flow');
 });
 

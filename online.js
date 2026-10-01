@@ -49,11 +49,30 @@
       $('rush-balance').textContent=rush?'RUSH in vault: '+(rush.available?tokenText(rush.tokens):'unavailable'):'';
     }catch{ $('vault-balance').textContent='UNAVAILABLE';$('rush-balance').textContent='Vault balance could not refresh'; }
   }
-  function name(){return $('player-name').value.trim()||'Runner';}
+  let suggestedHolderName='';
+  function restoreHolderName(address=$('wallet').value.trim()){
+    const field=$('holder-name');
+    // Keep a name the player is editing; only replace an automatic suggestion.
+    if(field.value.trim()&&field.value!==suggestedHolderName)return;
+    let saved='';
+    try{saved=localStorage.getItem('rush-holder-name:'+address)||'';}catch{}
+    field.value=saved.slice(0,20);suggestedHolderName=field.value;
+  }
+  function rememberHolderName(address,value){
+    try{localStorage.setItem('rush-holder-name:'+address,value);}catch{}
+    $('holder-name').value=value;suggestedHolderName=value;
+  }
+  $('wallet').addEventListener('input',()=>restoreHolderName());
+  $('wallet').addEventListener('change',()=>restoreHolderName());
+  restoreHolderName();
+  function name(practice){return (!practice?$('holder-name').value.trim():'')||$('player-name').value.trim()||'Runner';}
   async function prepare(practice){
     try{
+      const displayName=name(practice),rewardWallet=entryWallet;
       await getConfig();
-      return await api('runs/start',{name:name(),mode:practice?'practice':'holder',engine:ENGINE,...(!practice?{wallet:entryWallet}:{})});
+      const ticket=await api('runs/start',{name:displayName,mode:practice?'practice':'holder',engine:ENGINE,...(!practice?{wallet:rewardWallet}:{})});
+      if(!practice)rememberHolderName(rewardWallet,displayName);
+      return ticket;
     }catch(error){
       // Static/offline practice is deliberately independent of the server.
       if(practice){$('practice-note').textContent='Local practice · leaderboard unavailable for this run';return null;}
@@ -132,6 +151,6 @@
     if(document.hidden){clearInterval(boardTimer);boardTimer=null;}
     else if(!$('leaderboard-panel').hidden){board();boardTimer=setInterval(board,10000);}
   });
-  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance',{wallet}),setWallet:wallet=>{entryWallet=wallet;},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance',{wallet}),setWallet:wallet=>{entryWallet=wallet;restoreHolderName(wallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();
