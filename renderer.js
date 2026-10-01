@@ -127,7 +127,8 @@
       this.intro = 1.7;
       this.camera.x -= 88;
       this.breached = false;
-      this.vaultY = run.terrain(-108) - 42;
+      const mount=this.groundPlacement(run,-108,155,0,[[-.46,.46]]);
+      this.vaultY=mount.y-53-mount.burial*.5;
     }
     breach() {
       this.breached = true;
@@ -146,35 +147,38 @@
       const ctx = this.ctx, t = 1.7 - this.intro;
       const charge = this.intro > 1.08;
       const blast = Math.max(0, t - .62);
-      const y = run.terrain(-108);
+      const mount=this.groundPlacement(run,-108,155,0,[[-.46,.46]]);
+      const y=mount.y,doorY=-53-mount.burial*.5;
+      // The vault embeds into the real hillside across its complete base.
+      // Sand drawn afterwards masks the buried stone, without a floating pad.
       ctx.save();ctx.translate(-108,y);
       if (charge)ctx.translate(Math.sin(t*70)*t*1.8,0);
       this.prop(0,0,0,155);
       if(this.breached){
-        ctx.fillStyle='#0a0908';ctx.beginPath();ctx.ellipse(8,-61,26,39,0,0,Math.PI*2);ctx.fill();
+        ctx.fillStyle='#0a0908';ctx.beginPath();ctx.ellipse(8,doorY-8,26,39,0,0,Math.PI*2);ctx.fill();
         ctx.strokeStyle='#40382e';ctx.lineWidth=3;ctx.stroke();
       }
       // A bright seam charges before the door is blown away.
       if (this.intro > 0) {
         const glow = charge ? t / .62 : Math.max(0,1 - blast * 3);
         ctx.globalAlpha = glow * .7;
-        ctx.fillStyle = '#e8a13a';ctx.fillRect(20,-94,3,67);
+        ctx.fillStyle = '#e8a13a';ctx.fillRect(20,doorY-41,3,67);
         ctx.globalAlpha = 1;
       }
       if (!this.breached) {
-        this.vaultDoor(14,-53,0);
+        this.vaultDoor(14,doorY,0);
       } else if (blast < 1.08 && this.intro > 0) {
-        ctx.save();ctx.translate(14-blast*190,-53-blast*180+blast*blast*160);
+        ctx.save();ctx.translate(14-blast*190,doorY-blast*180+blast*blast*160);
         ctx.rotate(-blast*5);this.vaultDoor(0,0,blast);ctx.restore();
         const radius=blast*240;
         ctx.globalAlpha=Math.max(0,.45-blast*.6);
         ctx.strokeStyle='#e8a13a';ctx.lineWidth=2;
-        ctx.beginPath();ctx.arc(20,-53,radius,0,Math.PI*2);ctx.stroke();
+        ctx.beginPath();ctx.arc(20,doorY,radius,0,Math.PI*2);ctx.stroke();
         // Smoke stays behind the hero and dissipates quickly.
         for(let i=0;i<6;i++){
           ctx.globalAlpha=Math.max(0,.3-blast*.3);
           ctx.fillStyle=i%2?'#8d8880':'#40382e';ctx.beginPath();
-          ctx.arc(15+i*7+blast*24,-35-i*8-blast*25,6+blast*(18+i*4),0,Math.PI*2);ctx.fill();
+          ctx.arc(15+i*7+blast*24,doorY+18-i*8-blast*25,6+blast*(18+i*4),0,Math.PI*2);ctx.fill();
         }
       }
       ctx.restore();ctx.globalAlpha=1;
@@ -245,6 +249,28 @@
     obstacle(index,x,y,width,height) {
       const rect=obstacles[index];
       this.ctx.drawImage(this.images.obstacles,...rect,x-width/2,y-height,width,height);
+    }
+    groundPlacement(run,x,width,angle=0,feet=[[-.45,.45]]) {
+      const cosine=Math.cos(angle),sine=Math.sin(angle),surface=run.terrain(x);
+      let base=surface;
+      for(const [a,b]of feet){
+        const left=a*width,right=b*width;
+        for(let local=left;local<right;local+=2){
+          base=Math.max(base,run.terrain(x+local*cosine)-local*sine);
+        }
+        base=Math.max(base,run.terrain(x+right*cosine)-right*sine);
+      }
+      // Every visible base/foot is slightly within the sand, including on
+      // curved crests and troughs. This is a rendering mount, not new physics.
+      return {x,y:base+2,angle,burial:base+2-surface};
+    }
+    groundShadow(run,x,width) {
+      const ctx=this.ctx,left=x-width*.48,right=x+width*.48;
+      ctx.beginPath();ctx.moveTo(left,run.terrain(left)+1);
+      for(let px=left+4;px<right;px+=4)ctx.lineTo(px,run.terrain(px)+1);
+      ctx.lineTo(right,run.terrain(right)+1);
+      for(let px=right;px>left;px-=4)ctx.lineTo(px,run.terrain(px)+3.5);
+      ctx.closePath();ctx.fillStyle='rgba(10,9,8,.25)';ctx.fill();
     }
     background(run) {
       const ctx = this.ctx, cam = this.camera;
@@ -363,10 +389,18 @@
       for (const scenery of run.scenery) {
         if (scenery.x < left || scenery.x > right)continue;
         ctx.globalAlpha = .50;
-        const biome=run.biome(scenery.x),y=run.terrain(scenery.x)+5;
-        if(biome===1)this.sprite(this.images.obstacles,obstacles[6],scenery.x,y,48*scenery.scale,false);
-        else if(biome===2)this.sprite(this.images.obstacles,obstacles[7],scenery.x,y,75*scenery.scale,false);
-        else this.prop(scenery.type === 'pylon' ? 1 : 7,scenery.x,y,(scenery.type==='pylon'?15:10)*scenery.scale);
+        const biome=run.biome(scenery.x),index=scenery.type==='pylon'?1:7;
+        const width=(biome===1?48:biome===2?75:index===1?15:10)*scenery.scale;
+        if(run.gaps.some(gap=>gap.x<scenery.x+width*.5&&gap.end>scenery.x-width*.5))continue;
+        // Trees and lights remain upright; wide stone arches follow the hill.
+        const feet=biome===1?[[-.26,.26]]:biome===2?[[-.49,-.26],[.22,.48]]:[[-.45,.45]];
+        const mount=this.groundPlacement(run,scenery.x,width,biome===2?run.slope(scenery.x):0,feet);
+        ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);
+        if(biome===1)this.sprite(this.images.obstacles,obstacles[6],0,0,width,false);
+        else if(biome===2)this.sprite(this.images.obstacles,obstacles[7],0,0,width,false);
+        else this.prop(index,0,0,width);
+        ctx.restore();
+
       }
       ctx.globalAlpha = 1;
       this.rails(run,left,right);
@@ -390,13 +424,16 @@
           ctx.beginPath();ctx.arc(0,0,width*.55*pulse,-.8,.9);ctx.stroke();ctx.restore();
         }
         else if(item.type==='boost') {
-          ctx.save();ctx.translate(item.x,item.y);ctx.rotate(run.slope(item.x));this.prop(5,0,3,52);ctx.restore();
+          this.groundShadow(run,item.x,52);
+          const mount=this.groundPlacement(run,item.x,52,run.slope(item.x));
+          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);ctx.restore();
         } else {
           const art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
-          ctx.save();ctx.translate(item.x,item.y);
-          ctx.rotate(run.slope(item.x));
-          if(art!==undefined)this.obstacle(art,0,1,item.width||38,item.height||28);
-          else this.prop(3,0,1,34);
+          this.groundShadow(run,item.x,item.width||38);
+          const mount=this.groundPlacement(run,item.x,item.width||38,run.slope(item.x));
+          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);
+          if(art!==undefined)this.obstacle(art,0,0,item.width||38,item.height||28);
+          else this.prop(3,0,0,34);
           if(item.hazard){
             // A small red crest remains readable on a phone at speed.
             ctx.fillStyle='#e03b3b';ctx.beginPath();

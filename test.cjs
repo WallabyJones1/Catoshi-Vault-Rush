@@ -188,12 +188,11 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
   await elements['pause-menu'].dispatch('click');
   await elements['practice-button'].dispatch('click');assert(frame);
 });
-test('audio preference and lack of AudioContext cannot block play',async()=>{
-  const button=new Element('sound-toggle'),document=new Element('document'),window=new Element('window');document.getElementById=()=>button;
-  const storage=new Map();vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{document,window,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},Math,Audio:class{play(){return Promise.resolve();}pause(){}}});
-  assert.equal(button.textContent,'SOUND ON');window.RushSound.unlock();window.RushSound.setPlaying(true);window.RushSound.effect({type:'coin'});
-  await button.dispatch('click');assert.equal(button.textContent,'SOUND OFF');assert.equal(storage.get('rush-muted'),'1');
-  await button.dispatch('click');assert.equal(button.textContent,'SOUND ON');window.RushSound.burst();
+test('audio initialization needs no button and ignores the old saved mute preference',()=>{
+ const document=new Element('document'),window=new Element('window');document.getElementById=()=>{throw Error('audio must not query a removed button');};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{document,window,localStorage:{getItem(){throw Error('must not read stale mute');}},Math,Audio:class{play(){return Promise.resolve();}pause(){}},Date});
+ assert(window.RushSound);assert.doesNotThrow(()=>{window.RushSound.unlock();window.RushSound.setPlaying(true);window.RushSound.effect({type:'coin'});window.RushSound.setPlaying(false);});
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');assert(!html.includes('sound-toggle')&&!html.includes('sound-test'));
 });
 
 test('RPC failover and exact balances never grant entry on failed or malformed responses',async()=>{
@@ -393,14 +392,14 @@ test('a gap entered during bump recovery stays recoverable even when the timer e
  const miss=recoveryRun();Object.assign(miss.player,{x:0,y:200,vx:100,vy:0,speed:100});miss.gaps=[{x:-10,end:500}];advance(miss,300);assert(miss.dead,'unprotected missed gaps still fail');
 });
 
-function audioHarness({broken=false,mobile=false}={}){
-  const button=new Element('sound-toggle'),document=new Element('document'),window=new Element('window');
-  document.getElementById=()=>button;document.hidden=false;
+function audioHarness({broken=false,mobile=false,disabled=false}={}){
+  const document=new Element('document'),window=new Element('window');let time=0;
+  document.getElementById=()=>{throw Error('audio must not need UI');};document.hidden=false;
   const parameter=()=>({value:0,setValueAtTime(){},exponentialRampToValueAtTime(){}});
   const node=()=>({connect(){},disconnect(){this.disconnected=true;},gain:parameter()});
   const contexts=[];
   class Context{
-    constructor(){this.state='suspended';this.sampleRate=48000;this.currentTime=10;this.destination=node();this.buffers=[];this.sources=[];this.listeners=[];this.resumes=0;contexts.push(this);}
+    constructor(options){this.options=options;this.state='suspended';this.sampleRate=48000;this.currentTime=10;this.destination=node();this.buffers=[];this.sources=[];this.listeners=[];this.resumes=0;contexts.push(this);}
     createGain(){return node();}
     createDynamicsCompressor(){return {...node(),threshold:parameter(),knee:parameter(),ratio:parameter(),attack:parameter(),release:parameter()};}
     createBuffer(channels,length){if(broken)throw Error('buffer unavailable');const data=new Float32Array(length),buffer={length,getChannelData:()=>data};this.buffers.push(buffer);return buffer;}
@@ -413,17 +412,19 @@ function audioHarness({broken=false,mobile=false}={}){
     close(){this.closed=true;this.state='closed';return Promise.resolve();}
   }
   let music,finishMusic;const tracks=[];class Track{
-    constructor(src){this.src=src;this.plays=0;this.pauses=0;this.history=[];tracks.push(this);if(src==='music.mp3')music=this;}
-    play(){this.plays++;this.history.push(this.src);if(this.plays===1)return new Promise(resolve=>{this.finishPlay=resolve;if(this.src==='music.mp3')finishMusic=resolve;});return Promise.resolve();}
-    pause(){this.pauses++;}
+    constructor(src){this.src=src;this.plays=0;this.pauses=0;this.paused=true;this.readyState=0;this.loads=0;this.listeners={};this.history=[];tracks.push(this);if(src==='music.mp3')music=this;}
+    play(){this.plays++;this.paused=false;this.history.push(this.src);if(this.plays===1)return new Promise(resolve=>{this.finishPlay=resolve;if(this.src==='music.mp3')finishMusic=resolve;});return Promise.resolve();}
+    pause(){this.pauses++;this.paused=true;}
+    load(){this.loads++;this.readyState=3;this.listeners.canplay?.();}
+    addEventListener(type,callback){this.listeners[type]=callback;}
   }
-  window.AudioContext=Context;window.RushAudioConfig={musicSrc:'music.mp3',musicVolume:.16,effectsVolume:.72};
+  window.AudioContext=Context;window.RushAudioConfig={enabled:!disabled,musicSrc:'music.mp3',musicVolume:.16,effectsVolume:.72};
   const navigator={audioSession:{type:'ambient'},maxTouchPoints:mobile?5:0};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{window,document,navigator,Audio:Track,localStorage:{getItem(){},setItem(){}},Math,Set,Promise,setTimeout,clearTimeout,Date});
-  return {button,document,window,contexts,navigator,tracks,get music(){return music;},finishMusic:()=>finishMusic?.()};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{window,document,navigator,Audio:Track,localStorage:{getItem(){},setItem(){}},Math,Set,Promise,setTimeout,clearTimeout,Date,performance:{now:()=>time}});
+  return {document,window,contexts,navigator,tracks,setNow:value=>{time=value;},get music(){return music;},finishMusic:()=>finishMusic?.()};
 }
 
-test('audible blast and every coin unlock, queue, resume and stop correctly on mobile audio states',async()=>{
+test('audible blast and every coin start immediately, resume and stop with play states',async()=>{
   const h=audioHarness(),sound=h.window.RushSound;
   await h.window.dispatch('pointerdown');const ctx=h.contexts[0];
   assert.equal(h.navigator.audioSession.type,'playback');assert.equal(ctx.resumes,1);
@@ -440,18 +441,18 @@ test('audible blast and every coin unlock, queue, resume and stop correctly on m
   ctx.wake();await Promise.resolve();
   assert.equal(ctx.sources.filter(source=>source.buffer===blast).length,1);
   const chimes=ctx.sources.filter(source=>source.buffer===coin);assert.equal(chimes.length,3,'rapid pickups are not dropped');
-  assert(chimes[1].at>chimes[0].at&&chimes[2].at>chimes[1].at);
+  assert(chimes.every(source=>source.at===ctx.currentTime),'no per-coin delay or cumulative scheduling backlog');
   h.finishMusic();await Promise.resolve();assert.equal(h.music.pauses,0);
   ctx.state='interrupted';sound.effect({type:'coin'});assert.equal(ctx.resumes,2);ctx.wake();await Promise.resolve();
   assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'interrupted Safari context resumes');
   ctx.state='interrupted';sound.effect({type:'coin'});sound.setPlaying(false);ctx.wake();await Promise.resolve();
   assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'paused runs discard queued effects');
   assert(chimes.every(source=>source.stopped));
-  sound.setPlaying(true);await h.button.dispatch('click');sound.effect({type:'coin'});
-  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'mute suppresses new effects');
-  await h.button.dispatch('click');sound.effect({type:'coin'});assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,5);
+  sound.setPlaying(true);sound.effect({type:'coin'});
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,5,'resume starts immediately');
   h.document.hidden=true;await h.document.dispatch('visibilitychange');sound.effect({type:'coin'});
   assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,5);assert(h.music.pauses>0);
+
 });
 
 test('a partially supported AudioContext cannot throw into the game loop',()=>{
@@ -563,21 +564,39 @@ test('top ten unique wallets share both pools exactly; finalized transfers settl
 });
 
 
-test('mobile WAV voices unlock on the first tap, play the blast and every coin, and stop on pause',async()=>{
- const h=audioHarness({mobile:true}),sound=h.window.RushSound;
- sound.unlock();const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav');assert.equal(voices.length,8);
- assert(voices.every(track=>track.plays===1&&track.pauses===0),'do not abort the gesture-authorized silent play');
- sound.setPlaying(true);sound.burst();sound.effect({type:'jump'});sound.effect({type:'flip-start'});sound.effect({type:'stumble',material:'metal'});
- for(const voice of voices)voice.finishPlay();await Promise.resolve();await Promise.resolve();
- const history=()=>voices.flatMap(voice=>voice.history);
- for(const kind of ['burst','jump','flip','metal'])assert(history().includes('sfx-'+kind+'-v1.wav'));
- for(let i=0;i<3;i++)sound.effect({type:'coin'});
- await new Promise(resolve=>setTimeout(resolve,150));assert.equal(history().filter(src=>src==='sfx-coin-v1.wav').length,3);
- sound.effect({type:'coin'});sound.setPlaying(false);await new Promise(resolve=>setTimeout(resolve,60));
- assert.equal(history().filter(src=>src==='sfx-coin-v1.wav').length,3,'pause cancels queued pickup sounds');
- assert(voices.every(voice=>voice.pauses>0));sound.setPlaying(true);sound.effect({type:'rush'});sound.effect({type:'redRush'});sound.effect({type:'crash'});
- for(const kind of ['rush','red','crash'])assert(history().includes('sfx-'+kind+'-v1.wav'));
- await h.button.dispatch('click');const before=history().length;sound.burst();assert.equal(history().length,before,'muting also stops mobile media effects');
+test('mobile uses cached Web Audio for every cue, with no file loads, timers or future scheduling',async()=>{
+ const h=audioHarness({mobile:true}),sound=h.window.RushSound;sound.unlock();const ctx=h.contexts[0];ctx.wake();await Promise.resolve();sound.setPlaying(true);
+ assert.equal(ctx.options.latencyHint,'interactive');assert.equal(h.navigator.audioSession.type,'playback');
+ const buffers=ctx.buffers.length,tracks=h.tracks.length;const sourceCount=ctx.sources.length;
+ for(let i=0;i<25;i++)sound.effect({type:'coin'});
+ for(const event of [{type:'burst'},{type:'jump'},{type:'flip-start'},{type:'flip'},{type:'stumble',material:'metal'}, {type:'land'},{type:'rush'},{type:'redRush'},{type:'crash'}])sound.effect(event);
+ const chimes=ctx.sources.slice(sourceCount).filter(source=>source.buffer===ctx.buffers[0]);
+ assert.equal(chimes.length,25);assert(chimes.every(source=>source.at===ctx.currentTime),'25 simultaneous pickups do not leave a one-second backlog');
+ for(const source of ctx.sources.slice(sourceCount).filter(source=>source.buffer&&ctx.buffers.slice(0,8).includes(source.buffer)))assert.equal(source.at,ctx.currentTime,'every sample starts at the event time');
+ assert.equal(ctx.buffers.length,buffers,'no PCM regeneration while playing');assert.equal(h.tracks.length,tracks,'no new audio element or file load on an event');
+ assert(h.tracks.every(track=>['sfx-silence-v1.wav','music.mp3'].includes(track.src)),'mobile effects never stream WAV files when Web Audio works');
+ sound.setPlaying(false);assert(chimes.every(source=>source.stopped));
+});
+test('fallback clips preload once and replay immediately without changing sources',async()=>{
+ const h=audioHarness({broken:true}),sound=h.window.RushSound;sound.unlock();
+ const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav');assert.equal(voices.length,19);
+ for(const voice of voices)voice.finishPlay();await Promise.resolve();await Promise.resolve();sound.setPlaying(true);
+ const initial=voices.map(voice=>({src:voice.src,loads:voice.loads}));
+ for(let i=0;i<8;i++)sound.effect({type:'coin'});
+ for(const kind of ['burst','jump','flip','crash','rush','redRush'])sound.effect({type:kind});
+ assert.equal(voices.filter(voice=>voice.src==='sfx-coin-v1.wav').reduce((sum,voice)=>sum+voice.history.filter(src=>src==='sfx-coin-v1.wav').length,0),8,'fallback coin calls happen synchronously');
+ assert.deepEqual(voices.map(voice=>({src:voice.src,loads:voice.loads})),initial,'events do not reload or switch media files');
+ sound.setPlaying(false);assert(voices.every(voice=>voice.paused));
+});
+test('audio can still be disabled through config without any visible toggle',()=>{
+ const h=audioHarness({disabled:true}),sound=h.window.RushSound;sound.unlock();sound.setPlaying(true);sound.burst();sound.effect({type:'coin'});assert.equal(h.contexts.length,0);assert.equal(h.tracks.length,0);
+});
+test('interruption recovery discards stale cues instead of playing delayed coin and crash backlogs',async()=>{
+ const h=audioHarness({mobile:true}),sound=h.window.RushSound;sound.unlock();sound.setPlaying(true);const ctx=h.contexts[0];
+ sound.burst();for(let i=0;i<12;i++)sound.effect({type:'coin'});h.setNow(200);ctx.wake();await Promise.resolve();
+ assert.equal(ctx.sources.filter(source=>ctx.buffers.slice(0,8).includes(source.buffer)).length,0,'no stale sounds after late resume');
+ sound.effect({type:'coin'});assert.equal(ctx.sources.filter(source=>source.buffer===ctx.buffers[0]).length,1,'fresh cues start immediately');
+ ctx.state='interrupted';h.setNow(210);sound.effect({type:'jump'});h.setNow(240);ctx.wake();await Promise.resolve();assert.equal(ctx.sources.filter(source=>source.buffer===ctx.buffers[2]).length,1,'a brief interruption retains the fresh jump cue');
 });
 test('a pending resume promise cannot prevent a later trusted tap from retrying audio',async()=>{
  const h=audioHarness(),sound=h.window.RushSound;sound.unlock();const ctx=h.contexts[0];assert.equal(ctx.resumes,1);
@@ -594,9 +613,9 @@ test('all bundled effects are valid, audible PCM WAVs with faded tails; priming 
 });
 
 
-test('a stalled mobile priming request can be retried and its late resolution cannot stop a newer effect',async()=>{
- const h=audioHarness({mobile:true}),sound=h.window.RushSound;sound.unlock();
- const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav');
+test('a stalled fallback priming request can be retried and its late resolution cannot stop a newer effect',async()=>{
+ const h=audioHarness({broken:true,mobile:true}),sound=h.window.RushSound;sound.unlock();
+ const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav'&&!track.loop);
  sound.setPlaying(true);sound.burst();await h.window.dispatch('touchend');await Promise.resolve();
  assert(voices.every(voice=>voice.plays>=2),'retry media while an earlier play promise is pending');
  assert(voices.some(voice=>voice.history.includes('sfx-burst-v1.wav')));
