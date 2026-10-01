@@ -79,13 +79,73 @@
       if (event.type === 'crash') this.shake = .32;
     }
     breakout(run) {
-      this.intro = .7;
-      const x = -108, y = run.terrain(x) - 40;
-      for(let i=0;i<32;i++)this.particles.push({
-        x:x+Math.random()*20,y:y+Math.random()*50,vx:70+Math.random()*220,vy:-20-Math.random()*170,
-        life:.45+Math.random()*.5,max:1,color:i%4===0?'#f26b35':i%2?'#e8a13a':'#8d8880',size:1.5+Math.random()*2.4
-      });
-      this.shake=.2;
+      this.intro = 1.7;
+      this.camera.x -= 88;
+      this.breached = false;
+      this.vaultY = run.terrain(-108) - 42;
+    }
+    breach() {
+      this.breached = true;
+      this.shake = .32;
+      for (let i = 0; i < 42; i++) {
+        const direction = -1.35 + Math.random() * 2.3;
+        const speed = 90 + Math.random() * 250;
+        this.particles.push({ x: -108, y: this.vaultY,
+          vx: Math.cos(direction) * speed, vy: Math.sin(direction) * speed - 70,
+          life: .55 + Math.random() * .55, max: 1.1,
+          color: i % 5 === 0 ? '#e8a13a' : i % 2 ? '#8d8880' : '#40382e',
+          size: 2 + Math.random() * 5, angle: Math.random() * 6.28, spin: Math.random() * 8 - 4 });
+      }
+    }
+    vault(run) {
+      const ctx = this.ctx, t = 1.7 - this.intro;
+      const charge = this.intro > 1.08;
+      const blast = Math.max(0, t - .62);
+      const y = run.terrain(-108);
+      ctx.save();ctx.translate(-108,y);
+      if (charge)ctx.translate(Math.sin(t*70)*t*1.8,0);
+      this.prop(0,0,0,155);
+      if(this.breached){
+        ctx.fillStyle='#0a0908';ctx.beginPath();ctx.ellipse(8,-61,26,39,0,0,Math.PI*2);ctx.fill();
+        ctx.strokeStyle='#40382e';ctx.lineWidth=3;ctx.stroke();
+      }
+      // A bright seam charges before the door is blown away.
+      if (this.intro > 0) {
+        const glow = charge ? t / .62 : Math.max(0,1 - blast * 3);
+        ctx.globalAlpha = glow * .7;
+        ctx.fillStyle = '#e8a13a';ctx.fillRect(20,-94,3,67);
+        ctx.globalAlpha = 1;
+      }
+      if (!this.breached) {
+        this.vaultDoor(14,-53,0);
+      } else if (blast < 1.08 && this.intro > 0) {
+        ctx.save();ctx.translate(14-blast*190,-53-blast*180+blast*blast*160);
+        ctx.rotate(-blast*5);this.vaultDoor(0,0,blast);ctx.restore();
+        const radius=blast*240;
+        ctx.globalAlpha=Math.max(0,.45-blast*.6);
+        ctx.strokeStyle='#e8a13a';ctx.lineWidth=2;
+        ctx.beginPath();ctx.arc(20,-53,radius,0,Math.PI*2);ctx.stroke();
+        // Smoke stays behind the hero and dissipates quickly.
+        for(let i=0;i<6;i++){
+          ctx.globalAlpha=Math.max(0,.3-blast*.3);
+          ctx.fillStyle=i%2?'#8d8880':'#40382e';ctx.beginPath();
+          ctx.arc(15+i*7+blast*24,-35-i*8-blast*25,6+blast*(18+i*4),0,Math.PI*2);ctx.fill();
+        }
+      }
+      ctx.restore();ctx.globalAlpha=1;
+    }
+    vaultDoor(x,y,t) {
+      const ctx=this.ctx;ctx.save();ctx.translate(x,y);
+      ctx.fillStyle='#241e19';ctx.strokeStyle='#8d8880';ctx.lineWidth=3;
+      ctx.beginPath();ctx.arc(0,0,29,0,Math.PI*2);ctx.fill();ctx.stroke();
+      ctx.strokeStyle='#e8a13a';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(0,0,23,0,Math.PI*2);ctx.stroke();
+      ctx.strokeStyle='#8d8880';ctx.lineWidth=3;
+      for(let i=0;i<4;i++){
+        const a=i*Math.PI/2;ctx.beginPath();ctx.moveTo(Math.cos(a)*5,Math.sin(a)*5);
+        ctx.lineTo(Math.cos(a)*15,Math.sin(a)*15);ctx.stroke();
+      }
+      ctx.fillStyle='#e8a13a';ctx.beginPath();ctx.arc(0,0,4,0,Math.PI*2);ctx.fill();ctx.restore();
     }
     update(run, dt) {
       if (!this.ready) this.reset(run);
@@ -96,10 +156,14 @@
       this.camera.zoom += (zoom - this.camera.zoom) * ease;
       const targetY = p.y + altitude * .58 - this.height * (portrait?.60:.64) / this.camera.zoom;
       this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 5));
-      this.camera.x = p.x - this.width * (portrait?.24:.22) / this.camera.zoom;
+      const launchProgress=clamp((1.08-this.intro)/1.08,0,1);
+      const focusX=this.intro>0 ? -88+88*(1-Math.pow(1-launchProgress,2)) : p.x;
+      this.camera.x = focusX - this.width * (portrait?.24:.22) / this.camera.zoom;
       this.landPose = Math.max(0, this.landPose - dt);
       this.shake = Math.max(0, this.shake - dt);
+      const beforeIntro = this.intro;
       this.intro = Math.max(0, this.intro - dt);
+      if(beforeIntro > 1.08 && this.intro <= 1.08 && !this.breached)this.breach();
       if (p.grounded && p.speed > 200 && !run.dead) {
         this.dust += dt;
         if (this.dust > .055) {
@@ -108,7 +172,7 @@
         }
       }
       for (const q of this.particles) {
-        q.x += q.vx * dt; q.y += q.vy * dt; q.vy += 130 * dt; q.life -= dt;
+        q.x += q.vx * dt; q.y += q.vy * dt; q.vy += (q.spin === undefined ? 130 : 380) * dt; q.life -= dt; if(q.spin!==undefined)q.angle+=q.spin*dt;
       }
       this.particles = this.particles.filter(q => q.life > 0).slice(-120);
     }
@@ -215,12 +279,7 @@
       if (this.shake) ctx.translate(Math.sin(run.time * 81) * this.shake * 5,Math.cos(run.time * 94) * this.shake * 5);
       ctx.scale(cam.zoom,cam.zoom);ctx.translate(-cam.x,-cam.y);
       const left = cam.x - 120, right = cam.x + W/cam.zoom + 120, bottom = cam.y + H/cam.zoom + 1000;
-      if (left < 50 && right > -150) {
-        ctx.globalAlpha = .82;
-        ctx.save();ctx.translate(-110,run.terrain(-110));
-        if(this.intro>0)ctx.rotate(Math.sin((.7-this.intro)*23)*this.intro*.04);
-        this.prop(0,0,0,125);ctx.restore();ctx.globalAlpha=1;
-      }
+      if (left < 50 && right > -220) this.vault(run);
       for (const scenery of run.scenery) {
         if (scenery.x < left || scenery.x > right)continue;
         ctx.globalAlpha = .65;
@@ -243,7 +302,7 @@
       }
       for(const q of this.particles){
         ctx.globalAlpha = clamp(q.life/q.max,0,.6);ctx.fillStyle=q.color;
-        ctx.fillRect(q.x,q.y,q.size,q.size);
+        ctx.save();ctx.translate(q.x,q.y);if(q.angle!==undefined)ctx.rotate(q.angle);ctx.fillRect(-q.size/2,-q.size/2,q.size,q.size);ctx.restore();
       }
       ctx.globalAlpha=1;
       if(run.dog.active){
@@ -257,12 +316,20 @@
       else if(this.landPose>0)frame=6;
       else if(!p.grounded)frame=p.held && p.heldTime>.14 ? 2 : p.vy<0 ? 4 : 5;
       else frame=p.rail?3:p.speed>430?1:0;
-      const actorX=p.x-110*Math.pow(this.intro/.7,2);
-      const actorY=this.intro>0&&p.grounded?run.terrain(actorX):p.y;
-      ctx.save();ctx.translate(actorX,actorY-1);ctx.rotate(p.angle);
+      const launch = clamp((1.08-this.intro)/1.08,0,1);
+      const progress = 1-Math.pow(1-launch,2);
+      const actorX=this.intro>0 ? -88+88*progress : p.x;
+      const actorY=this.intro>0 ? run.terrain(actorX)-Math.sin(launch*Math.PI)*42 : p.y;
+      if(this.intro>1.08)frame=1;
+      else if(this.intro>.4)frame=4;
+      else if(this.intro>0)frame=6;
+      ctx.save();ctx.translate(actorX,actorY-1);ctx.rotate(this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
       if(p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.55;
       this.sprite(this.images.characters,characters[frame],0,0,portrait?60:40,false);
       ctx.restore();ctx.restore();ctx.globalAlpha=1;
+      if(this.intro>0 && this.intro<=1.08 && this.intro>.96){
+        ctx.fillStyle='rgba(242,239,233,'+((this.intro-.96)/.12*.16)+')';ctx.fillRect(0,0,W,H);
+      }
     }
   }
   return { Renderer, loadAssets, assets, characters, props, strips, W, H };

@@ -28,6 +28,28 @@ test('varied terrain, safe introductions, immediate jumping, backflip bonus and 
   const chase=new Run(5);chase.terrain=()=>200;chase.derivative=()=>0;chase.slope=()=>0;chase.player.y=200;chase.player.speed=90;chase.player.boost=0;chase.items=[];
   advance(chase,130);assert(chase.dog.active);chase.player.speed=500;advance(chase,180);assert(!chase.dead);assert(!chase.dog.active);
 });
+test('terrain has large smooth hills, distinct regions and lookup-order-independent seeds',()=>{
+  const modes=new Set(),openings=new Set();let biggest=0;
+  for(let seed=1;seed<=80;seed++){
+    const a=new Run(seed),b=new Run(seed);
+    const probe=Array.from({length:200},(_,i)=>3000+i*125);
+    const forward=probe.map(x=>a.terrain(x));
+    // Camera look-ahead must never change the generated route or collectibles.
+    for(const x of probe.slice().reverse())b.terrain(x);
+    assert.deepEqual(probe.map(x=>b.terrain(x)),forward);
+    a.generate(12000);b.generate(12000);assert.deepEqual(a.items,b.items);
+    openings.add(a.items[0].x.toFixed(2));
+    let low=Infinity,high=-Infinity;
+    for(let x=3000;x<28000;x+=20){
+      modes.add(a.region(x));const height=a.terrain(x)-x*a.profile.grade;
+      low=Math.min(low,height);high=Math.max(high,height);
+      assert(Math.abs(a.derivative(x))<1.55,'readable slopes, no random cliffs');
+      assert(Math.abs(a.derivative(x+.01)-a.derivative(x-.01))<.001,'smooth terrain seams');
+    }
+    biggest=Math.max(biggest,high-low);
+  }
+  assert.equal(modes.size,5);assert(openings.size>75);assert(biggest>800,'occasional genuinely big dunes and valleys');
+});
 test('deterministic server replay ignores fabricated score fields and rejects invalid recordings',()=>{
   const input=simulate(111);const checked=security.replay(111,input.ticks,input.inputs);
   assert.equal(checked.score,Math.floor(input.run.score));assert.equal(checked.coins,input.run.coins);
@@ -146,7 +168,8 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
   await elements['practice-button'].dispatch('click');assert(createdRun);
   const frames=count=>{for(let i=0;i<count;i++){now+=1000/60;const cb=frame;frame=null;cb?.(now);}};
-  frames(80);assert.equal(bursts,1);
+  frames(20);assert.equal(createdRun.time,0,'no hidden simulation during vault animation');assert.equal(bursts,0);
+  frames(100);assert.equal(bursts,1);
   await elements['jump-control'].dispatch('pointerdown',{pointerId:1,pointerType:'touch'});assert(createdRun.player.held&&!createdRun.player.grounded);assert(sounds>0);
   await elements['jump-control'].dispatch('pointerup',{pointerId:1,pointerType:'touch'});assert(!createdRun.player.held);
   const before=createdRun.time;await elements.pause.dispatch('click');frames(100);assert.equal(createdRun.time,before);

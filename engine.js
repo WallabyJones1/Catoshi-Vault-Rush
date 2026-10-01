@@ -20,9 +20,11 @@
     constructor(seed) {
       this.seed = (seed || Date.now()) >>> 0;
       this.random = random(this.seed);
+      // Coordinate-based terrain noise has its own seed: looking farther ahead
+      // never consumes item RNG or changes the server's replay.
       this.phase = this.random() * 0.18;
       this.profile = {
-        grade: .22 + this.random() * .035,
+        grade: .25 + this.random() * .045,
         longWave: 2200 + this.random() * 550,
         shortWave: 880 + this.random() * 240,
         longHeight: 130 + this.random() * 30,
@@ -36,7 +38,7 @@
       this.gaps = [];
       this.scenery = [];
       this.events = [];
-      this.nextFeature = 650;
+      this.nextFeature = 560 + this.random() * 280;
       this.nextScenery = -50;
       this.feature = 0;
       this.player = {
@@ -56,11 +58,46 @@
       this.generate(2700);
     }
 
+    terrainRandom(cell, salt) {
+      let n = Math.imul(cell | 0, 374761393) ^ Math.imul(this.seed, 668265263) ^ salt;
+      n = Math.imul(n ^ n >>> 13, 1274126177);
+      return ((n ^ n >>> 16) >>> 0) / 4294967296;
+    }
+    smooth(t) { return t * t * t * (t * (t * 6 - 15) + 10); }
+    noise(x, width, salt) {
+      const cell = Math.floor(x / width), t = this.smooth(x / width - cell);
+      const a = this.terrainRandom(cell, salt), b = this.terrainRandom(cell + 1, salt);
+      return (a + (b - a) * t) * 2 - 1;
+    }
+    region(x) {
+      const cell = Math.floor((x - 1800) / 4200);
+      const mode = Math.floor(this.terrainRandom(cell, 7919) * 5);
+      return ['ROLLING DUNES', 'GIANT DUNE', 'DEEP VALLEY', 'RUSH DESCENT', 'RIDGELINE'][mode];
+    }
     terrain(x) {
       const t = this.profile;
-      return 230 + x * t.grade
-        + Math.cos(x * TAU / t.longWave + 0.3 + this.phase) * t.longHeight
+      const opening = Math.cos(x * TAU / t.longWave + .3 + this.phase) * t.longHeight
         + Math.sin(x * TAU / t.shortWave + t.shortPhase) * t.shortHeight;
+      // A broad, safe entry slope blends into non-repeating terrain after 120m.
+      const blend = this.smooth(clamp((x - 1200) / 1500, 0, 1));
+      let varied = this.noise(x, 1800, 173) * 165 + this.noise(x, 650, 947) * 38;
+      const cell = Math.floor((x - 1800) / 4200);
+      for (let i = cell - 1; i <= cell + 1; i++) {
+        const mode = Math.floor(this.terrainRandom(i, 7919) * 5);
+        const center = 1800 + i * 4200 + 1300 + this.terrainRandom(i, 104729) * 1500;
+        const radius = 1400 + this.terrainRandom(i, 15485863) * 450;
+        const u = (x - center) / radius;
+        if (Math.abs(u) >= 1) continue;
+        // Compact C2 bumps: no seams, cliffs or sudden changes in slope.
+        const envelope = Math.pow(1 - u * u, 3);
+        const height = 260 + this.terrainRandom(i, 32452843) * 290;
+        if (mode === 1) varied -= height * envelope;
+        else if (mode === 2) varied += height * envelope;
+        else if (mode === 3) varied += height * u * envelope;
+        else if (mode === 4) varied -= 200 * envelope * Math.cos(u * Math.PI * 2);
+        else varied += 105 * envelope * Math.sin(u * Math.PI * 3);
+      }
+      return 230 + x * t.grade + opening * (1 - blend) + varied * blend;
     }
     derivative(x) { return (this.terrain(x + 1) - this.terrain(x - 1)) * 0.5; }
     slope(x) { return Math.atan(this.derivative(x)); }
@@ -91,11 +128,11 @@
         const y = this.terrain(x);
         const index = this.feature++;
         const stage = Math.min(4, Math.floor(x / 6500));
-        const choices = [0,0,2,2,5,7,4,8,9];
-        let pattern = index === 0 ? 0 : index === 1 ? 7 : index === 2 ? 2 : choices[Math.floor(this.random() * choices.length)];
+        const choices = this.derivative(x) < -.12 ? [0,0,7,7,2,5] : [0,0,2,2,5,7,4,8,9];
+        let pattern = index === 0 ? 0 : index === 1 ? (this.random() < .55 ? 7 : 0) : choices[Math.floor(this.random() * choices.length)];
         if(index > 2 && pattern === this.lastPattern && [2,5,9].includes(pattern)) pattern = 0;
         this.lastPattern = pattern;
-        let spacing = 430 + this.random() * 260;
+        let spacing = 440 + this.random() * 410;
         if (pattern === 2) {
           const ramp = { x, end: x + 150 + this.random() * 40, y, endY: y - 68 - this.random() * 25 };
           this.ramps.push(ramp);
@@ -103,7 +140,7 @@
             const cx = ramp.end + 45 + i * 38;
             this.items.push({ type: 'coin', x: cx, y: ramp.endY - 40 - Math.sin(i / 7 * Math.PI) * 120, hit: false });
           }
-          spacing = 670;
+          spacing = 650 + this.random() * 230;
         } else if (pattern === 5) {
           const end = x + 760 + this.random() * 170;
           const rail = { x, end, y: y - 105, endY: this.terrain(end) - 130 };
@@ -116,7 +153,7 @@
             this.items.push({ type: 'coin', x: cx, y: this.railY(rail, cx) - 24, hit: false });
           }
           this.coinTrail(x - 100, 5, 135);
-          spacing = 1120;
+          spacing = 1080 + this.random() * 260;
         } else if (pattern === 7) {
           this.items.push({ type: 'boost', x, y: y - 3, hit: false });
           this.coinTrail(x + 70, 8, 15);
@@ -124,7 +161,7 @@
           const gap = { x, end: x + 210 + stage * 18 };
           this.gaps.push(gap);
           this.coinTrail(x - 180, 11, 140);
-          spacing = 690;
+          spacing = 700 + this.random() * 190;
         } else if ((pattern === 4 || pattern === 8) && x > 2400) {
           this.items.push({ type: this.random() < 0.6 ? 'rock' : 'crate', x, y, hit: false });
           if (stage > 1 && this.random() < 0.45) this.items.push({ type: 'rock', x: x + 145, y: this.terrain(x + 145), hit: false });
@@ -250,7 +287,7 @@
       if (p.grounded) {
         let angle = p.rail ? this.railSlope(p.rail, p.x) : p.ramp ? this.rampSlope(p.ramp, p.x) : this.slope(p.x);
         const acceleration = 620 * Math.sin(angle) * 0.45 + 24 - p.speed * 0.06 + (p.boost > 0 ? 75 : 0);
-        p.speed = clamp(p.speed + acceleration * dt, 75, 760);
+        p.speed = clamp(p.speed + acceleration * dt, p.stagger > 0 || angle >= -.08 ? 75 : 175, 760);
         p.vx = p.speed * Math.cos(angle);
         p.vy = p.speed * Math.sin(angle);
         p.x += p.vx * dt;

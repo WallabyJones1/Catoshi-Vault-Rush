@@ -74,9 +74,9 @@
       if (operation !== startId) return;
       setRunTicket(onlineTicket);
       renderer = new VaultRushRenderer.Renderer(ctx,images);
-      run = new VaultRush.Run(onlineTicket?.seed||Date.now()); renderer.reset(run); renderer.draw(run);
+      run = new VaultRush.Run(onlineTicket?.seed||Date.now()); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       window.RushSound.setPlaying(true);
-      phase = 'countdown'; countdown = 1.15; accumulator = 0; trickTime = 0;
+      phase = 'countdown'; countdown = 1.7; accumulator = 0; trickTime = 0;
       ui.countdown.textContent = 'READY';
       updateHud(); last = performance.now();
       canvas.focus({ preventScroll: true });
@@ -139,8 +139,8 @@
     if (phase === 'countdown') {
       const before=countdown;
       countdown -= dt;
-      if(before>.38&&countdown<=.38){renderer.breakout(run);window.RushSound.burst();}
-      ui.countdown.textContent = countdown > .38 ? 'READY' : 'RUSH';
+      if(before>1.08&&countdown<=1.08)window.RushSound.burst();
+      ui.countdown.textContent = countdown > 1.08 ? 'READY' : countdown > .5 ? 'BREAK OUT' : 'RUSH';
       if (countdown <= 0) { phase = 'running'; ui.countdown.textContent = ''; accumulator = 0; }
     } else if (phase === 'running') {
       accumulator += dt;
