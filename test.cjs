@@ -110,7 +110,7 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   const board=(await request('/api/leaderboard?mode=practice')).value;assert.equal(board.entries[0].name,'Cat Runner');assert(!Object.hasOwn(board.entries[0],'session'));
   assert.match((await request('/score/'+ticket.id)).value,/og:title/);
   for(const file of ['server.cjs','.env','security.cjs','test.cjs','data/catoshi.sqlite'])assert.equal((await request('/'+file)).res.status,404);
-  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png'])assert.equal((await request('/'+file)).res.status,200);
+  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png'])assert.equal((await request('/'+file)).res.status,200);
   const range=await fetch(base+'/music.mp3',{headers:{Range:'bytes=0-31'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-length'),'32');assert.equal((await range.arrayBuffer()).byteLength,32);
   const badRange=await fetch(base+'/music.mp3',{headers:{Range:'bytes=999999999999-'}});assert.equal(badRange.status,416);await badRange.arrayBuffer();
   assert.equal((await request('/api/auth/challenge',{wallet})).res.status,404);
@@ -231,6 +231,9 @@ test('practice starts locally after a working config but failed start API; holde
   elements.wallet.value=security.MINT;await elements.wallet.dispatch('input');assert.equal(elements['holder-name'].value,'Wallaby');
   elements['holder-name'].value='New Name';await elements.wallet.dispatch('change');assert.equal(elements['holder-name'].value,'New Name','autofill must preserve manual edits');
   await window.RushOnline.prepare(true);assert.equal(requests.at(-1)[1].name,'Practice Cat','practice keeps its own name');
+  const checked=await window.RushOnline.balance(' '+security.MINT+' ');assert(checked.eligible);
+  const lookup=requests.at(-1);assert.equal(lookup[1],null,'balance is a read-only GET');
+  assert.equal(new URLSearchParams(lookup[0].split('?')[1]).get('wallet'),security.MINT);
   assert(!requests.some(([url])=>url.includes('/auth/')),'no connection or signature flow');
 });
 
@@ -257,11 +260,171 @@ test('current request host fixes stale Railway origins while cross-site and forw
   config.production=false;
   assert.equal(await post('https://evil.invalid'),403);
   assert.equal(await post(null),403);
+  assert.equal(await post(null,{referer:base+'/'}),200,'mobile same-origin Referer works when Origin is omitted');
+  assert.equal(await post(null,{referer:'https://evil.invalid/'}),403);
+  assert.equal(await post('null',{referer:base+'/'}),403);
   assert.equal(await post('https://evil.invalid',{'x-forwarded-host':'evil.invalid'}),403);
   assert.equal(await post(base,{'sec-fetch-site':'cross-site'}),403);
+  assert.equal(await post(null,{referer:base+'/','sec-fetch-site':'cross-site'}),403);
+  const read=await fetch(base+'/api/balance?'+new URLSearchParams({wallet:' '+security.MINT+' '}));
+  assert.equal(read.status,200,'read-only balance check needs no POST Origin header');
+  const readBalance=await read.json();assert(readBalance.eligible);assert.equal(readBalance.wallet,security.MINT);
   const ticketRes=await fetch(base+'/api/runs/start',{method:'POST',headers:{'content-type':'application/json',origin:base},body:JSON.stringify({name:'Holder',wallet:security.MINT,mode:'holder',engine:security.ENGINE_VERSION})});
   assert.equal(ticketRes.status,200);await ticketRes.json();
   assert.equal(configFromEnv({NODE_ENV:'production',RAILWAY_PUBLIC_DOMAIN:'game.up.railway.app',DATABASE_PATH:'/data/test.sqlite'}).origin,'https://game.up.railway.app');
+});
+
+test('unattended runs fail; active taps can clear early hazards within phone look-ahead',()=>{
+  let clearable=0;const routes=new Set(),hazards=new Set();
+  for(let seed=1;seed<=300;seed++){
+    const idle=new Run(seed);advance(idle,120*20);
+    assert(idle.dead,'no input must not complete a round');assert(idle.time>4,'the introduction stays safe');
+    const route=new Run(seed);route.generate(40000);routes.add(route.biomes.join(','));
+    for(const item of route.items)if(item.fatal)hazards.add(item.type);
+    let cleared=false;
+    for(const distance of [100,150,200,250,300,350,400,450,500,550,600]){
+      const run=new Run(seed),gate=run.items.find(item=>item.fatal);let tapped=false;
+      for(let tick=0;tick<120*20&&!run.dead;tick++){
+        if(!tapped&&gate.x-run.player.x<distance){run.press();run.release();tapped=true;}
+        run.step(1/120);
+        if(run.player.x>gate.x+95){cleared=!run.dead;break;}
+      }
+      if(cleared)break;
+    }
+    clearable+=cleared;
+  }
+  assert(clearable>=294,'timed taps should clear early hazards in at least 98% of sampled routes; crest landings also require control');
+  assert.equal(routes.size,6,'all orders of the three extra biomes occur');
+  assert.deepEqual([...hazards].sort(),['barrier','cart','spikes','stack']);
+});
+
+test('ramps join ground with continuous height, slope and curvature and no step onto the kicker',()=>{
+  let rampCount=0;
+  for(let seed=1;seed<=80;seed++){
+    const run=new Run(seed);run.generate(40000);
+    for(const ramp of run.ramps){
+      rampCount++;
+      for(const x of [ramp.x,ramp.end,ramp.recovery]){
+        assert(Math.abs(run.derivative(x+.01)-run.derivative(x-.01))<.001,'continuous slope through each join');
+        const curvature=x=>(run.derivative(x+.05)-run.derivative(x-.05))/.1;
+        assert(Math.abs(curvature(x+.01)-curvature(x-.01))<.0001,'continuous curvature through each join');
+      }
+      for(let x=ramp.x;x<ramp.recovery;x+=16)assert(Math.abs(run.rampY(ramp,x)-run.terrain(x))<1e-7,'ramp and drawn ground agree');
+    }
+  }
+  assert(rampCount>300);
+  const run=new Run(42);run.generate(12000);const ramp=run.ramps[0];assert(ramp);
+  Object.assign(run.player,{x:ramp.x-15,y:run.terrain(ramp.x-15),speed:420,boost:0,grounded:true});
+  run.items=[];let entered=false,launched=false;
+  for(let tick=0;tick<240&&!run.dead;tick++){
+    const oldY=run.player.y;run.step(1/120);
+    if(run.player.ramp===ramp)entered=true;
+    if(run.player.grounded)assert(Math.abs(run.player.y-oldY)<10,'no vertical snap on the ground');
+    if(run.drainEvents().some(event=>event.text==='LAUNCH')){launched=true;break;}
+  }
+  assert(entered&&launched,'the joined ramp still provides a takeoff');
+});
+
+test('red hazards defeat invulnerability and an actual timed jump clears their collision shape',()=>{
+  const setup=()=>{
+    const run=new Run(5);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;run.ramps=[];run.gaps=[];run.rails=[];
+    Object.assign(run.player,{x:0,y:200,speed:400,vx:400,boost:0,angle:0,grounded:true});
+    run.items=[{type:'spikes',x:180,y:200,width:70,height:31,fatal:true,hit:false}];return run;
+  };
+  const idle=setup();idle.player.invulnerable=3;advance(idle,120);assert.equal(idle.reason,'HIT THE SPIKES');
+  const jumped=setup();jumped.press();jumped.release();advance(jumped,90);assert(!jumped.dead);assert(jumped.player.x>250);
+});
+
+function audioHarness({broken=false}={}){
+  const button=new Element('sound-toggle'),document=new Element('document'),window=new Element('window');
+  document.getElementById=()=>button;document.hidden=false;
+  const parameter=()=>({value:0,setValueAtTime(){},exponentialRampToValueAtTime(){}});
+  const node=()=>({connect(){},disconnect(){this.disconnected=true;},gain:parameter()});
+  const contexts=[];
+  class Context{
+    constructor(){this.state='suspended';this.sampleRate=48000;this.currentTime=10;this.destination=node();this.buffers=[];this.sources=[];this.listeners=[];this.resumes=0;contexts.push(this);}
+    createGain(){return node();}
+    createDynamicsCompressor(){return {...node(),threshold:parameter(),knee:parameter(),ratio:parameter(),attack:parameter(),release:parameter()};}
+    createBuffer(channels,length){if(broken)throw Error('buffer unavailable');const data=new Float32Array(length),buffer={length,getChannelData:()=>data};this.buffers.push(buffer);return buffer;}
+    createBufferSource(){const source={...node(),playbackRate:parameter(),start(at=0){this.at=at;this.started=true;},stop(){this.stopped=true;}};this.sources.push(source);return source;}
+    createOscillator(){return {...this.createBufferSource(),frequency:parameter()};}
+    createBiquadFilter(){return {...node(),frequency:parameter()};}
+    addEventListener(type,callback){if(type==='statechange')this.listeners.push(callback);}
+    resume(){this.resumes++;return new Promise(resolve=>{this.resolveResume=resolve;});}
+    wake(){this.state='running';for(const callback of this.listeners)callback();this.resolveResume?.();}
+    close(){this.closed=true;this.state='closed';return Promise.resolve();}
+  }
+  let music,finishMusic;class Track{
+    constructor(){music=this;this.plays=0;this.pauses=0;}
+    play(){this.plays++;if(this.plays===1)return new Promise(resolve=>{finishMusic=resolve;});return Promise.resolve();}
+    pause(){this.pauses++;}
+  }
+  window.AudioContext=Context;window.RushAudioConfig={musicSrc:'music.mp3',musicVolume:.16,effectsVolume:.72};
+  const navigator={audioSession:{type:'ambient'}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{window,document,navigator,Audio:Track,localStorage:{getItem(){},setItem(){}},Math,Set,Promise});
+  return {button,document,window,contexts,navigator,get music(){return music;},finishMusic:()=>finishMusic?.()};
+}
+
+test('audible blast and every coin unlock, queue, resume and stop correctly on mobile audio states',async()=>{
+  const h=audioHarness(),sound=h.window.RushSound;
+  await h.window.dispatch('pointerdown');const ctx=h.contexts[0];
+  assert.equal(h.navigator.audioSession.type,'playback');assert.equal(ctx.resumes,1);
+  assert.equal(h.music.pauses,0,'do not abort the first gesture-authorized music play');
+  const [coin,blast]=ctx.buffers;
+  for(const [buffer,peakLimit]of [[coin,.801],[blast,.901]]){
+    const values=buffer.getChannelData(0);let energy=0,peak=0;
+    for(const value of values){assert(Number.isFinite(value));energy+=value*value;peak=Math.max(peak,Math.abs(value));}
+    assert(Math.sqrt(energy/values.length)>.04,'effects contain audible PCM');assert(peak<=peakLimit);
+    assert(Math.abs(values.at(-1))<.005,'tails fade instead of clicking');
+  }
+  sound.setPlaying(true);sound.burst();for(let i=0;i<3;i++)sound.effect({type:'coin'});
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,0,'wait for audio resume');
+  ctx.wake();await Promise.resolve();
+  assert.equal(ctx.sources.filter(source=>source.buffer===blast).length,1);
+  const chimes=ctx.sources.filter(source=>source.buffer===coin);assert.equal(chimes.length,3,'rapid pickups are not dropped');
+  assert(chimes[1].at>chimes[0].at&&chimes[2].at>chimes[1].at);
+  h.finishMusic();await Promise.resolve();assert.equal(h.music.pauses,0);
+  ctx.state='interrupted';sound.effect({type:'coin'});assert.equal(ctx.resumes,2);ctx.wake();await Promise.resolve();
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'interrupted Safari context resumes');
+  ctx.state='interrupted';sound.effect({type:'coin'});sound.setPlaying(false);ctx.wake();await Promise.resolve();
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'paused runs discard queued effects');
+  assert(chimes.every(source=>source.stopped));
+  sound.setPlaying(true);await h.button.dispatch('click');sound.effect({type:'coin'});
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'mute suppresses new effects');
+  await h.button.dispatch('click');sound.effect({type:'coin'});assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,5);
+  h.document.hidden=true;await h.document.dispatch('visibilitychange');sound.effect({type:'coin'});
+  assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,5);assert(h.music.pauses>0);
+});
+
+test('a partially supported AudioContext cannot throw into the game loop',()=>{
+  const h=audioHarness({broken:true}),sound=h.window.RushSound;
+  assert.doesNotThrow(()=>{sound.unlock();sound.setPlaying(true);sound.burst();sound.effect({type:'coin'});sound.setPlaying(false);});
+  assert(h.contexts.every(context=>context.closed));
+});
+
+test('balance response validation retries healthy RPCs and program queries handle both Solana token programs',async()=>{
+  const address=encode58(Buffer.alloc(32,9)),otherMint=encode58(Buffer.alloc(32,8));
+  const entry=(mint,amount,key,program)=>({pubkey:key,account:{owner:program,data:{parsed:{info:{owner:address,mint,tokenAmount:{amount,decimals:6}}}}}});
+  const okay=result=>({ok:true,json:async()=>({result})});
+  const calls=[];
+  const value=await security.tokenBalance(' '+address+' ',['https://bad.invalid','https://good.invalid'],async endpoint=>{
+    calls.push(endpoint);return okay({value:endpoint.includes('bad')?[{}]:[entry(security.MINT,'50000123456','one')]});
+  });
+  assert.deepEqual(calls,['https://bad.invalid','https://good.invalid']);assert.equal(value.raw,50000123456n);assert(value.eligible);
+  for(const program of ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA','TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb']){
+    const methods=[];
+    const balance=await security.tokenBalance(address,'https://indexed.invalid',async(_endpoint,options)=>{
+      const request=JSON.parse(options.body);methods.push(request.method);
+      if(request.method==='getAccountInfo')return okay({value:{owner:program,data:{parsed:{type:'mint',info:{decimals:6}}}}});
+      if(request.params[1].mint)return {ok:true,json:async()=>({error:{code:-32010,message:'mint index unavailable'}})};
+      assert.equal(request.params[1].programId,program);
+      return okay({value:[entry(otherMint,'999999999999','other',program),entry(security.MINT,'40000000000','first',program),entry(security.MINT,'10000000000','second',program)]});
+    });
+    assert.equal(balance.raw,50000000000n);assert(balance.eligible);
+    assert.deepEqual(methods,['getTokenAccountsByOwner','getAccountInfo','getTokenAccountsByOwner']);
+  }
+  await assert.rejects(security.tokenBalance(address,'https://duplicate.invalid',async()=>okay({value:[entry(security.MINT,'30000000000','duplicate'),entry(security.MINT,'30000000000','duplicate')]})),/Invalid token/);
+  await assert.rejects(security.tokenBalance(address,'https://wrong.invalid',async()=>okay({value:[entry(security.MINT,'50000000000','one','11111111111111111111111111111111')]})),/Invalid token/);
 });
 
 test('vault API exposes both real balances, reports outages honestly, and snapshots the current prize day',async t=>{

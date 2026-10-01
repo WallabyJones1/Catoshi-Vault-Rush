@@ -1,18 +1,19 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-3';
+  const ENGINE='flow-web-4';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardMode='practice',boardRound=null,previousFocus=null,vaultTimer=null;
   async function api(endpoint,data,timeout=12000){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),timeout);
-    let response;
-    try{response=await fetch('/api/'+endpoint,{
+    try{const response=await fetch('/api/'+endpoint,{
       method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json'}:{},
       body:data?JSON.stringify(data):undefined,signal:controller.signal
-    });}finally{clearTimeout(timer);}
+    });
     let value;try{value=await response.json();}catch{throw Error('The leaderboard server is not available here.');}
     if(!response.ok)throw Error(value.error||'Request failed.');return value;
+    }catch(error){if(error.name==='AbortError')throw Error('The request timed out. Please retry shortly.');throw error;}
+    finally{clearTimeout(timer);}
   }
   async function getConfig(){
     if(config)return config;
@@ -151,6 +152,6 @@
     if(document.hidden){clearInterval(boardTimer);boardTimer=null;}
     else if(!$('leaderboard-panel').hidden){board();boardTimer=setInterval(board,10000);}
   });
-  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance',{wallet}),setWallet:wallet=>{entryWallet=wallet;restoreHolderName(wallet);},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance?'+new URLSearchParams({wallet:wallet.trim()}),null,15000),setWallet:wallet=>{entryWallet=wallet.trim();restoreHolderName(entryWallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();

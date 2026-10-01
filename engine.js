@@ -31,6 +31,9 @@
         shortHeight: 62 + this.random() * 18,
         shortPhase: .14 + this.random() * .24
       };
+      this.biomeSpan=4700+this.terrainRandom(0,982451653)*1100;
+      const routes=[1,2,3].sort((a,b)=>this.terrainRandom(a,433494437)-this.terrainRandom(b,433494437));
+      this.biomes=[0,...routes];
       this.lastPattern = -1;
       this.items = [];
       this.rails = [];
@@ -74,7 +77,12 @@
       const mode = Math.floor(this.terrainRandom(cell, 7919) * 5);
       return ['ROLLING DUNES', 'GIANT DUNE', 'DEEP VALLEY', 'RUSH DESCENT', 'RIDGELINE'][mode];
     }
-    terrain(x) {
+    biome(x) { return this.biomes[Math.floor(Math.max(0,x)/this.biomeSpan)%this.biomes.length]; }
+    biomeTransition(x) {
+      const section=Math.floor(Math.max(0,x)/this.biomeSpan),t=Math.max(0,x)/this.biomeSpan-section;
+      return {from:this.biomes[section%4],to:this.biomes[(section+1)%4],mix:this.smooth(clamp((t-.83)/.17,0,1))};
+    }
+    baseTerrain(x) {
       const t = this.profile;
       const opening = Math.cos(x * TAU / t.longWave + .3 + this.phase) * t.longHeight
         + Math.sin(x * TAU / t.shortWave + t.shortPhase) * t.shortHeight;
@@ -99,6 +107,21 @@
       }
       return 230 + x * t.grade + opening * (1 - blend) + varied * blend;
     }
+    rampLift(ramp,x) {
+      if(x<ramp.x||x>ramp.recovery)return 0;
+      const length=ramp.end-ramp.x;
+      if(x<=ramp.end){const t=(x-ramp.x)/length;return ramp.height*t*t*t;}
+      // Quintic recovery matches height, slope and curvature at the lip,
+      // then blends all three back into the ordinary ground.
+      const width=ramp.recovery-ramp.end,u=(x-ramp.end)/width;
+      const a=ramp.height,b=3*ramp.height*width/length,c=3*ramp.height*width*width/(length*length);
+      return a+b*u+c*u*u+(-10*a-6*b-3*c)*u**3+(15*a+8*b+3*c)*u**4+(-6*a-3*b-c)*u**5;
+    }
+    terrain(x) {
+      let lift=0;
+      for(const ramp of this.ramps||[])lift+=this.rampLift(ramp,x);
+      return this.baseTerrain(x)-lift;
+    }
     derivative(x) { return (this.terrain(x + 1) - this.terrain(x - 1)) * 0.5; }
     slope(x) { return Math.atan(this.derivative(x)); }
     gapAt(x) { return this.gaps.find(g => x > g.x && x < g.end); }
@@ -108,11 +131,10 @@
     }
     railSlope(rail, x) { return Math.atan((this.railY(rail, x + 2) - this.railY(rail, x - 2)) / 4); }
     rampY(ramp, x) {
-      const t = clamp((x - ramp.x) / (ramp.end - ramp.x), 0, 1);
-      return ramp.y + (ramp.endY - ramp.y) * t * t;
+      return this.baseTerrain(x)-this.rampLift(ramp,x);
     }
     rampSlope(ramp, x) {
-      return Math.atan(2 * (ramp.endY - ramp.y) * clamp((x - ramp.x) / (ramp.end - ramp.x), 0, 1) / (ramp.end - ramp.x));
+      return Math.atan((this.rampY(ramp,x+1)-this.rampY(ramp,x-1))*.5);
     }
     event(type, data) { this.events.push({ type, ...data }); }
     coinTrail(x, count, arc) {
@@ -124,23 +146,51 @@
     generate(ahead) {
       const limit = this.player.x + ahead;
       while (this.nextFeature < limit) {
-        const x = this.nextFeature;
-        const y = this.terrain(x);
         const index = this.feature++;
-        const stage = Math.min(4, Math.floor(x / 6500));
+        let x=index===2?Math.max(this.nextFeature,2600+this.terrainRandom(0,179)*450):this.nextFeature;
+        const stage = Math.min(4, Math.floor(x / 5000));
         const choices = this.derivative(x) < -.12 ? [0,0,7,7,2,5] : [0,0,2,2,5,7,4,8,9];
         let pattern = index === 0 ? 0 : index === 1 ? (this.random() < .55 ? 7 : 0) : choices[Math.floor(this.random() * choices.length)];
+        // Active-play gates appear after the gentle introduction. They are
+        // spaced apart from automatic ramps and have clear run-up/landing space.
+        if(index===2||(index>2&&index%3===2))pattern=10;
+        if(pattern===10){
+          // Put required jumps after a readable approach, not at the end of
+          // an automatic crest/ramp flight where a phone gives no warning.
+          let best=x,bestRisk=Infinity;
+          for(let step=0;step<64;step++){
+            const candidate=x+step*40;
+            let risk=0;
+            for(let cx=candidate-600;cx<=candidate+90;cx+=45){
+              const slope=Math.abs(this.derivative(cx));
+              const curvature=(this.derivative(cx+5)-this.derivative(cx-5))/10;
+              risk=Math.max(risk,slope/.65,curvature/.0011);
+            }
+            if(this.ramps.some(r=>r.end>candidate-650&&r.x<candidate+80)||this.gaps.some(g=>g.end>candidate-500&&g.x<candidate+80))risk+=3;
+            if(risk<bestRisk){best=candidate;bestRisk=risk;}
+            if(risk<=1)break;
+          }
+          x=best;
+        }
+        const y=this.terrain(x);
         if(index > 2 && pattern === this.lastPattern && [2,5,9].includes(pattern)) pattern = 0;
         this.lastPattern = pattern;
         let spacing = 440 + this.random() * 410;
         if (pattern === 2) {
-          const ramp = { x, end: x + 150 + this.random() * 40, y, endY: y - 68 - this.random() * 25 };
+          const end=x+230+this.random()*65;
+          const ramp={x,end,recovery:end+220+this.random()*45,height:48+this.random()*20,y};
+          for(let tune=0;tune<4;tune++){
+            let steep=false;
+            for(let cx=x;cx<=ramp.recovery;cx+=12)if(Math.abs((this.rampY(ramp,cx+1)-this.rampY(ramp,cx-1))*.5)>1.35)steep=true;
+            if(!steep)break;ramp.height*=.7;
+          }
+          ramp.endY=this.rampY(ramp,ramp.end);
           this.ramps.push(ramp);
           for (let i = 0; i < 8; i++) {
             const cx = ramp.end + 45 + i * 38;
             this.items.push({ type: 'coin', x: cx, y: ramp.endY - 40 - Math.sin(i / 7 * Math.PI) * 120, hit: false });
           }
-          spacing = 650 + this.random() * 230;
+          spacing = ramp.recovery-x+270+this.random()*170;
         } else if (pattern === 5) {
           const end = x + 760 + this.random() * 170;
           const rail = { x, end, y: y - 105, endY: this.terrain(end) - 130 };
@@ -157,17 +207,24 @@
         } else if (pattern === 7) {
           this.items.push({ type: 'boost', x, y: y - 3, hit: false });
           this.coinTrail(x + 70, 8, 15);
-        } else if (pattern === 9 && stage > 0 && this.derivative(x) > .05) {
-          const gap = { x, end: x + 210 + stage * 18 };
+        } else if (pattern === 9 && x>4500 && this.derivative(x) > .05) {
+          const gap = { x, end: x + 240 + stage * 24 };
           this.gaps.push(gap);
           this.coinTrail(x - 180, 11, 140);
           spacing = 700 + this.random() * 190;
+        } else if(pattern===10){
+          const kind=index===2?'barrier':['barrier','spikes','stack','cart'][Math.floor(this.random()*4)];
+          const size={barrier:[66,38],spikes:[70,31],stack:[48,61],cart:[58,42]}[kind];
+          this.items.push({type:kind,x,y,width:size[0],height:size[1],fatal:true,hit:false});
+          this.coinTrail(x-155,7,105+stage*8);
+          this.coinTrail(x+175,5,15);
+          spacing=740+this.random()*260;
         } else if ((pattern === 4 || pattern === 8) && x > 2400) {
-          this.items.push({ type: this.random() < 0.6 ? 'rock' : 'crate', x, y, hit: false });
+          this.items.push({ type: this.random() < 0.55 ? 'rock' : 'log', x, y, width:45,height:27,hit: false });
           if (stage > 1 && this.random() < 0.45) this.items.push({ type: 'rock', x: x + 145, y: this.terrain(x + 145), hit: false });
           this.coinTrail(x + 150, 7, 30);
         } else this.coinTrail(x, 8 + Math.floor(this.random() * 4), index % 3 === 0 ? 95 : 0);
-        this.nextFeature += spacing;
+        this.nextFeature = x+spacing;
       }
       while (this.nextScenery < limit + 700) {
         const x = this.nextScenery;
@@ -218,8 +275,9 @@
       const p = this.player;
       const impact = p.vy * Math.cos(angle) - p.vx * Math.sin(angle);
       const rotation = Math.abs(angleDelta(p.angle - angle));
-      if (p.airborne > 0.25 && ((p.held && rotation > 1.12) || impact > 1050)) {
-        this.crash(p.held && rotation > 1.12 ? 'CRASH LANDING' : 'HARD LANDING');
+      const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
+      if (p.airborne > 0.25 && ((p.held && rotation > 1.02) || impact > impactLimit)) {
+        this.crash(p.held && rotation > 1.02 ? 'CRASH LANDING' : 'HARD LANDING');
         return;
       }
       p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), 115, 780);
@@ -298,7 +356,7 @@
         } else if (p.ramp) {
           p.y = this.rampY(p.ramp, p.x);
           if (p.x >= p.ramp.end) {
-            this.launch(angle, 65);
+            this.launch(angle, 110);
             this.event('trick', { text: 'LAUNCH', points: 0 });
           }
         } else {
@@ -348,7 +406,8 @@
         if (p.y > this.terrain(p.x) + 600) this.crash('MISSED THE GAP');
       }
       for (const item of this.items) {
-        if (item.hit || Math.abs(item.x - p.x) > 35) continue;
+        const half=(item.width||42)*.5+12+(item.fatal?item.height:0);
+        if (item.hit || (item.fatal?Math.max(previousX,p.x)<item.x-half||Math.min(previousX,p.x)>item.x+half:Math.abs(item.x-p.x)>35)) continue;
         if (item.type === 'coin' && Math.abs(item.y - (p.y - 17)) < 32) {
           item.hit = true;
           this.coins++;
@@ -361,7 +420,13 @@
           p.boost = 2.5;
           this.event('trick', { text: 'RUSH BOOST', points: 80 });
           this.score += 80;
-        } else if ((item.type === 'rock' || item.type === 'crate') && p.y > item.y - 30 && p.y < item.y + 15) this.stumble(item);
+        } else if(item.fatal){
+          const angle=this.slope(item.x),dx=p.x-item.x,dy=p.y-item.y;
+          const localX=dx*Math.cos(angle)+dy*Math.sin(angle),localY=dy*Math.cos(angle)-dx*Math.sin(angle);
+          if(Math.abs(localX)<item.width*.5+12&&localY>-item.height-5&&localY<32){
+            item.hit=true;this.crash(item.type==='spikes'?'HIT THE SPIKES':'HIT THE '+item.type.toUpperCase());
+          }
+        } else if (['rock','crate','log'].includes(item.type) && p.y > item.y - (item.height||30) && p.y < item.y + 15) this.stumble(item);
       }
       this.score += (p.x - previousX) * 0.055;
       this.slowTime = p.speed < 155 ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
@@ -380,11 +445,11 @@
       this.generate(2600);
       this.items = this.items.filter(i => !i.hit && i.x > p.x - 300);
       this.rails = this.rails.filter(r => r.end > p.x - 600);
-      this.ramps = this.ramps.filter(r => r.end > p.x - 600);
+      this.ramps = this.ramps.filter(r => r.recovery > p.x - 600);
       this.gaps = this.gaps.filter(g => g.end > p.x - 600);
       this.scenery = this.scenery.filter(s => s.x > p.x - 900);
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-3' };
+  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-4' };
 });

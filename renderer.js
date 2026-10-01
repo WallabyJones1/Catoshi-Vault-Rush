@@ -11,7 +11,9 @@
     layers: 'canyon-endless-layers.png',
     characters: 'catoshi-clean-actions.png',
     scenery: 'vault-scenery-atlas.png',
-    coin: 'catoshi-coin.png'
+    coin: 'catoshi-coin.png',
+    biomes: 'terrain-biomes-v1.png',
+    obstacles: 'terrain-obstacles-v1.png'
   };
   // Explicit crops preserve the complete silhouettes, including every token.
   const characters = [
@@ -25,6 +27,19 @@
   ];
   // Stop before each transparent gutter. Extend the final solid row below the ridge.
   const strips = [[0,0,1672,292],[0,314,1672,286],[0,628,1672,280]];
+  const biomeStrips = [[0,66,2146,172],[0,296,2146,179],[0,496,2146,211]];
+  const obstacles = [
+    [35,128,408,285], [480,217,410,195], [930,213,429,200], [1405,158,328,259],
+    [40,617,414,199], [524,480,331,341], [967,450,253,376], [1275,512,475,311]
+  ];
+  const palettes = [
+    ['#302820','#241e19'], ['#292b24','#1c201b'],
+    ['#302d2a','#22201e'], ['#2c2927','#201d1c']
+  ];
+  function mixColor(a,b,t) {
+    const av=parseInt(a.slice(1),16),bv=parseInt(b.slice(1),16);
+    return '#'+[16,8,0].map(shift=>Math.round(((av>>shift)&255)*(1-t)+((bv>>shift)&255)*t).toString(16).padStart(2,'0')).join('');
+  }
 
   function loadAssets(ImageType) {
     const Constructor = ImageType || Image;
@@ -183,6 +198,10 @@
     prop(index, x, y, width, centered) {
       this.sprite(this.images.scenery, props[index], x, y, width, centered);
     }
+    obstacle(index,x,y,width,height) {
+      const rect=obstacles[index];
+      this.ctx.drawImage(this.images.obstacles,...rect,x-width/2,y-height,width,height);
+    }
     background(run) {
       const ctx = this.ctx, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W,yScale=H/540;
@@ -190,47 +209,66 @@
       // One stationary warm light; the actual landscape layers move independently.
       ctx.globalAlpha = portrait?.38:.50;
       if(portrait){
-        const skyHeight=H*.66,skyWidth=skyHeight*2172/500;
+        const skyHeight=H*1.08,skyWidth=skyHeight*2172/500;
         ctx.drawImage(this.images.atmosphere,0,0,2172,500,(W-skyWidth)*.5,-H*.08,skyWidth,skyHeight);
-      }else ctx.drawImage(this.images.atmosphere, 0, 0, 2172, 500, 0, -90, W, 410);
+      }else ctx.drawImage(this.images.atmosphere,0,0,2172,500,0,-90,W,H+90);
       ctx.globalAlpha = 1;
-      const configs = [
-        { speed: .045, width: 1370, base: 370, height: 330, alpha: .40 },
-        { speed: .115, width: 1620, base: 452, height: 355, alpha: .66 },
-        { speed: .24, width: 1810, base: 558, height: 385, alpha: .90 }
-      ];
       const altitude = Math.max(0, run.terrain(run.player.x) - run.player.y);
-      configs.forEach((layer, index) => {
-        const offset = cam.x * layer.speed;
-        const first = Math.floor(offset / layer.width);
-        const top = (layer.base - layer.height)*yScale + altitude * (.012 + index * .012);
-        ctx.globalAlpha = layer.alpha;
-        for (let tile = first; tile <= first + 2; tile++) {
-          const x = tile * layer.width - offset;
-          ctx.save();
-          ctx.translate(x + (Math.abs(tile % 2) === 1 ? layer.width : 0), top);
-          if (Math.abs(tile % 2) === 1) ctx.scale(-1, 1);
-          ctx.drawImage(this.images.layers, ...strips[index], 0, 0, layer.width + .5, layer.height*yScale);
-          const strip=strips[index],base=layer.height*yScale;
-          if(top+base<H)ctx.drawImage(this.images.layers,strip[0],strip[1]+strip[3]-1,strip[2],1,0,base-.5,layer.width+.5,H-top-base+1);
-          ctx.restore();
-        }
-      });
+      const drawBiome=(biome,opacity)=>{
+        if(opacity<=0)return;
+        const configs = biome===0 ? [
+          { speed: .045, width: 1370, base: 370, height: 330, alpha: .40 },
+          { speed: .115, width: 1620, base: 452, height: 355, alpha: .66 },
+          { speed: .24, width: 1810, base: 558, height: 385, alpha: .90 }
+        ] : [
+          { speed: .065, width: 2110, base: 400, height: 275, alpha: .42 },
+          { speed: .18, width: 1750, base: 540, height: 320, alpha: .82 }
+        ];
+        const image=biome===0?this.images.layers:this.images.biomes;
+        configs.forEach((layer,index)=>{
+          const strip=biome===0?strips[index]:biomeStrips[biome-1];
+          const offset=cam.x*layer.speed,first=Math.floor(offset/layer.width);
+          const top=(layer.base-layer.height)*yScale+altitude*(.012+index*.012);
+          ctx.globalAlpha=layer.alpha*opacity;
+          for(let tile=first;tile<=first+Math.ceil(W/layer.width);tile++){
+            const x=tile*layer.width-offset,base=layer.height*yScale;
+            ctx.save();ctx.translate(x+(Math.abs(tile%2)===1?layer.width:0),top);
+            if(Math.abs(tile%2)===1)ctx.scale(-1,1);
+            // Mirrored neighbours share the same edge. The solid final row
+            // continues below the viewport without exposing atlas gutters.
+            ctx.drawImage(image,...strip,0,0,layer.width+.5,base);
+            if(top+base<H){
+              // Filtering a one-pixel source row samples the transparent
+              // gutter next to it and creates a horizontal band at its base.
+              ctx.imageSmoothingEnabled=false;
+              ctx.drawImage(image,strip[0],strip[1]+strip[3]-1,strip[2],1,0,base,layer.width+.5,H-top-base);
+              ctx.imageSmoothingEnabled=true;
+            }
+            ctx.restore();
+          }
+        });
+      };
+      const transition=run.biomeTransition(run.player.x);
+      drawBiome(transition.from,1-transition.mix);
+      drawBiome(transition.to,transition.mix);
       ctx.globalAlpha = 1;
     }
     terrain(run, left, right, bottom) {
       const ctx = this.ctx;
+      const transition=run.biomeTransition(run.player.x);
+      const ground=mixColor(palettes[transition.from][0],palettes[transition.to][0],transition.mix);
+      const stratum=mixColor(palettes[transition.from][1],palettes[transition.to][1],transition.mix);
       const drawSection = (start, end) => {
         if (end <= start) return;
         ctx.beginPath(); ctx.moveTo(start, bottom);
         ctx.lineTo(start, run.terrain(start));
-        for (let x = start + 12; x < end; x += 12) ctx.lineTo(x, run.terrain(x));
+        for (let x = start + 8; x < end; x += 8) ctx.lineTo(x, run.terrain(x));
         ctx.lineTo(end, run.terrain(end)); ctx.lineTo(end, bottom); ctx.closePath();
-        ctx.fillStyle = '#302820'; ctx.fill();
+        ctx.fillStyle = ground; ctx.fill();
         ctx.save(); ctx.clip();
         ctx.beginPath(); ctx.moveTo(start - 90, bottom);
         for (let x = start - 90; x <= end + 90; x += 20) ctx.lineTo(x, run.terrain(x + 70) + 83);
-        ctx.lineTo(end + 90,bottom); ctx.closePath(); ctx.fillStyle = '#241e19'; ctx.fill();
+        ctx.lineTo(end + 90,bottom); ctx.closePath(); ctx.fillStyle = stratum; ctx.fill();
         ctx.restore();
         ctx.beginPath(); ctx.moveTo(start, run.terrain(start));
         for (let x = start + 10; x < end; x += 10) ctx.lineTo(x, run.terrain(x));
@@ -246,13 +284,11 @@
       drawSection(start, right);
       for (const r of run.ramps) {
         if (r.end < left || r.x > right) continue;
-        ctx.beginPath();ctx.moveTo(r.x,run.terrain(r.x));
-        for (let x=r.x;x<r.end;x+=6)ctx.lineTo(x,run.rampY(r,x));
-        ctx.lineTo(r.end,r.endY);ctx.lineTo(r.end,run.terrain(r.end));ctx.closePath();
-        ctx.fillStyle='#393029';ctx.fill();
-        ctx.beginPath();ctx.moveTo(r.x,r.y);
-        for(let x=r.x+6;x<=r.end;x+=6)ctx.lineTo(x,run.rampY(r,x));
-        ctx.lineTo(r.end,r.endY);ctx.strokeStyle='rgba(232,161,58,.6)';ctx.lineWidth=2;ctx.stroke();
+        // The ramp is already part of the real ground, including its smooth
+        // recovery. Highlight only the takeoff rather than drawing a wedge.
+        ctx.beginPath();ctx.moveTo(r.end-90,run.terrain(r.end-90));
+        for(let x=r.end-84;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
+        ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(232,161,58,.5)';ctx.lineWidth=2;ctx.stroke();
       }
     }
     rails(run, left, right) {
@@ -282,8 +318,11 @@
       if (left < 50 && right > -220) this.vault(run);
       for (const scenery of run.scenery) {
         if (scenery.x < left || scenery.x > right)continue;
-        ctx.globalAlpha = .65;
-        this.prop(scenery.type === 'pylon' ? 1 : 7, scenery.x,scenery.y+3,(scenery.type==='pylon'?15:10)*scenery.scale);
+        ctx.globalAlpha = .50;
+        const biome=run.biome(scenery.x),y=run.terrain(scenery.x)+5;
+        if(biome===1)this.sprite(this.images.obstacles,obstacles[6],scenery.x,y,48*scenery.scale,false);
+        else if(biome===2)this.sprite(this.images.obstacles,obstacles[7],scenery.x,y,75*scenery.scale,false);
+        else this.prop(scenery.type === 'pylon' ? 1 : 7,scenery.x,y,(scenery.type==='pylon'?15:10)*scenery.scale);
       }
       ctx.globalAlpha = 1;
       this.rails(run,left,right);
@@ -297,7 +336,17 @@
         else if(item.type==='boost') {
           ctx.save();ctx.translate(item.x,item.y);ctx.rotate(run.slope(item.x));this.prop(5,0,3,52);ctx.restore();
         } else {
-          ctx.save();ctx.translate(item.x,item.y);ctx.rotate(run.slope(item.x));this.prop(item.type==='rock'?2:3,0,1,item.type==='rock'?32:34);ctx.restore();
+          const art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
+          ctx.save();ctx.translate(item.x,item.y);
+          ctx.rotate(run.slope(item.x));
+          if(art!==undefined)this.obstacle(art,0,1,item.width||38,item.height||28);
+          else this.prop(3,0,1,34);
+          if(item.fatal){
+            // A small red crest remains readable on a phone at speed.
+            ctx.fillStyle='#e03b3b';ctx.beginPath();
+            ctx.moveTo(-4,-item.height-7);ctx.lineTo(4,-item.height-7);ctx.lineTo(0,-item.height-12);ctx.closePath();ctx.fill();
+          }
+          ctx.restore();
         }
       }
       for(const q of this.particles){
@@ -332,5 +381,5 @@
       }
     }
   }
-  return { Renderer, loadAssets, assets, characters, props, strips, W, H };
+  return { Renderer, loadAssets, assets, characters, props, strips, biomeStrips, obstacles, W, H };
 });

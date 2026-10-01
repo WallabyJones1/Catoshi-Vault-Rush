@@ -15,6 +15,7 @@ const STATIC_FILES=new Map([
   ['home.js','text/javascript'],
   ['music.mp3','audio/mpeg'],['music.ogg','audio/ogg'],['music.wav','audio/wav'],
   ['canyon-atmosphere.png','image/png'],['canyon-endless-layers.png','image/png'],
+  ['terrain-biomes-v1.png','image/png'],['terrain-obstacles-v1.png','image/png'],
   ['catoshi-clean-actions.png','image/png'],['vault-scenery-atlas.png','image/png']
 ]);
 function openDatabase(filename) {
@@ -109,8 +110,13 @@ function createApp(config,options={}) {
   }
   function sameOrigin(req){
     const origin=req.headers.origin;
-    if(!origin||origin==='null')return false;
+    if(origin==='null')return false;
     if(req.headers['sec-fetch-site']&&req.headers['sec-fetch-site']!=='same-origin')return false;
+    if(!origin){
+      // Some mobile browsers omit Origin on same-site fetches. A same-origin
+      // Referer is sufficient; requests without either proof remain rejected.
+      try{const referer=new URL(req.headers.referer).origin;return referer===config.origin||referer===siteOrigin(req);}catch{return false;}
+    }
     try{if(new URL(origin).origin!==origin)return false;}catch{return false;}
     return origin===config.origin||origin===siteOrigin(req);
   }
@@ -136,6 +142,11 @@ function createApp(config,options={}) {
           if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
           json(res,{mode,round,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
         }
+        if(req.method==='GET'&&url.pathname==='/api/balance'){
+          const user=session(req,res);rate(req,'balance',12,user.id);
+          const address=walletAddress(url.searchParams.get('wallet')),value=await balance(address);
+          json(res,{wallet:address,tokens:typeof value.raw==='bigint'?fromRaw(value.raw,value.decimals):value.whole,eligible:value.eligible,minimumTokens:50000,checkedAt:now()});return;
+        }
         if(req.method==='GET'&&url.pathname==='/api/vault'){
           if(!config.vault){json(res,{configured:false,payoutMode:'manual-review'});return;}
           if(!vaultCache||now()-vaultCache.at>30000){
@@ -155,8 +166,8 @@ function createApp(config,options={}) {
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
         if(url.pathname==='/api/balance'){
-          rate(req,'balance',12,user.id);const value=await balance(walletAddress(data.wallet));
-          json(res,{tokens:value.whole,eligible:value.eligible,minimumTokens:50000});return;
+          rate(req,'balance',12,user.id);const address=walletAddress(data.wallet),value=await balance(address);
+          json(res,{wallet:address,tokens:typeof value.raw==='bigint'?fromRaw(value.raw,value.decimals):value.whole,eligible:value.eligible,minimumTokens:50000,checkedAt:now()});return;
         }
         if(url.pathname==='/api/runs/start'){
           rate(req,'starts',12,user.id);

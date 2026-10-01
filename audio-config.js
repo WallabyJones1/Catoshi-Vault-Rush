@@ -1,3 +1,3 @@
-// Add your own licensed soundtrack beside index.html, then set musicSrc to 'music.mp3'.
-// Supplied track: kaapz – Cat Arpeggio. Set musicSrc to '' to disable music.
-window.RushAudioConfig = { musicSrc: 'music.mp3', musicVolume: 0.16, effectsVolume: 0.32 };
+// Supplied soundtrack: kaapz – Cat Arpeggio. Set musicSrc to '' to disable music.
+// Effects include the vault explosion and one chime per collected coin.
+window.RushAudioConfig = { musicSrc: 'music.mp3', musicVolume: 0.16, effectsVolume: 0.72 };
