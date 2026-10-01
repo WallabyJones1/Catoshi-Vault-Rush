@@ -210,12 +210,14 @@ test('practice starts locally after a working config but failed start API; holde
   let startsFail=true;const requests=[];
   const fetcher=async(url,options)=>{
     requests.push([url,options.body?JSON.parse(options.body):null]);
-    const value=url.endsWith('/config')?{engine:security.ENGINE_VERSION,vault:'',prizesEnabled:false}:url.endsWith('/runs/start')?{id:'test',wallet:security.MINT}:{eligible:true,tokens:'50000'};
+    const value=url.endsWith('/config')?{engine:security.ENGINE_VERSION,vault:security.MINT,prizesEnabled:true,rewards:{catoshiPool:'100000',rushPool:'50'}}:url.endsWith('/vault')?{configured:true,tokens:'1234567.89',assets:[{symbol:'CATOSHI',available:true,tokens:'1234567.89'},{symbol:'RUSH',available:true,tokens:'42.5'}]}:url.endsWith('/runs/start')?{id:'test',wallet:security.MINT}:{eligible:true,tokens:'50000'};
     return {ok:!(startsFail&&url.endsWith('/runs/start')),json:async()=>startsFail&&url.endsWith('/runs/start')?{error:'Unavailable'}:value};
   };
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,AbortController,setTimeout,clearTimeout,setInterval,clearInterval,location:{protocol:'file:'},URLSearchParams,console});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},location:{protocol:'file:'},URLSearchParams,console});
   assert.equal(await window.RushOnline.prepare(true),null,'API failure must not block practice');
   assert.match(elements['practice-note'].textContent,/Local practice/);
+  assert.equal(elements['vault-balance'].textContent,'1,234,567.89');
+  assert.equal(elements['prize-pool'].textContent,'100,000 CATOSHI + 50 RUSH');
   startsFail=false;window.RushOnline.setWallet(security.MINT);
   const holder=await window.RushOnline.prepare(false);assert.equal(holder.wallet,security.MINT);
   assert.equal(requests.at(-1)[1].wallet,security.MINT);assert.equal(requests.at(-1)[1].mode,'holder');
@@ -231,4 +233,82 @@ test('a failed holder balance is not cached as zero or used to authorize a run',
   const denied=await start();assert.equal(denied.status,503);await denied.arrayBuffer();
   assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM runs').get().count,0);
   broken=false;const accepted=await start();assert.equal(accepted.status,200);assert.equal((await accepted.json()).wallet,security.MINT);assert.equal(calls,2);
+});
+
+test('current request host fixes stale Railway origins while cross-site and forwarded-host tricks fail',async t=>{
+  const config={...configFromEnv(),database:':memory:',origin:'https://old-name.up.railway.app'};
+  const app=createApp(config,{balance:async()=>({whole:'50000',eligible:true})});
+  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;
+  t.after(async()=>{await new Promise(resolve=>app.server.close(resolve));app.db.close();});
+  const post=async(origin,extra={})=>{const r=await fetch(base+'/api/balance',{method:'POST',headers:{'content-type':'application/json',...(origin?{origin}:{}),...extra},body:JSON.stringify({wallet:security.MINT})});await r.arrayBuffer();return r.status;};
+  assert.equal(await post(base),200,'actual browser origin accepted even if PUBLIC_ORIGIN is stale');
+  config.production=true;
+  assert.equal(await post(base.replace('http:','https:')),200,'Railway HTTPS origin matches the host behind its TLS proxy');
+  config.production=false;
+  assert.equal(await post('https://evil.invalid'),403);
+  assert.equal(await post(null),403);
+  assert.equal(await post('https://evil.invalid',{'x-forwarded-host':'evil.invalid'}),403);
+  assert.equal(await post(base,{'sec-fetch-site':'cross-site'}),403);
+  const ticketRes=await fetch(base+'/api/runs/start',{method:'POST',headers:{'content-type':'application/json',origin:base},body:JSON.stringify({name:'Holder',wallet:security.MINT,mode:'holder',engine:security.ENGINE_VERSION})});
+  assert.equal(ticketRes.status,200);await ticketRes.json();
+  assert.equal(configFromEnv({NODE_ENV:'production',RAILWAY_PUBLIC_DOMAIN:'game.up.railway.app',DATABASE_PATH:'/data/test.sqlite'}).origin,'https://game.up.railway.app');
+});
+
+test('vault API exposes both real balances, reports outages honestly, and snapshots the current prize day',async t=>{
+  const {ensureRound}=require('./rewards.cjs');
+  const vault=encode58(Buffer.alloc(32,44)),rush=encode58(Buffer.alloc(32,45));
+  const config={...configFromEnv({VAULT_WALLET:vault,RUSH_MINT:rush}),database:':memory:'};
+  let time=ROUND_MS+1,rushUnavailable=false;
+  const clock=()=>time;
+  const app=createApp(config,{now:clock,assetBalance:async(address,mint)=>{assert.equal(address,vault);if(rushUnavailable&&mint===rush)throw new security.HttpError(503,'RPC unavailable');return {raw:mint===security.MINT?1234567000000n:42500000n,decimals:6,whole:mint===security.MINT?'1234567':'42',eligible:false};}});
+  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;
+  t.after(async()=>{await new Promise(resolve=>app.server.close(resolve));app.db.close();});
+  const value=await (await fetch(base+'/api/vault')).json();assert.equal(value.assets.length,2);assert.equal(value.tokens,'1234567');assert.equal(value.assets[1].tokens,'42.5');
+  time+=31000;rushUnavailable=true;
+  const outage=await (await fetch(base+'/api/vault')).json();assert.equal(outage.assets[0].available,true);assert.equal(outage.assets[1].available,false);assert.equal(outage.assets[1].tokens,null,'RPC failure is not a fabricated zero');
+  assert.equal((await (await fetch(base+'/api/config')).json()).rewards.enabled,false);
+  const active=configFromEnv({VAULT_WALLET:vault,RUSH_MINT:rush,REWARDS_ENABLED:'true',CATOSHI_PRIZE_POOL:'100000',RUSH_PRIZE_POOL:'10.5'});
+  const first=ensureRound(app.db,1,active,ROUND_MS);assert.equal(first.tokens,'100000');assert.equal(first.rush_tokens,'10.5');
+  active.tokens='900000';active.rewards.rushTokens='99';
+  const same=ensureRound(app.db,1,active,ROUND_MS);assert.equal(same.tokens,'100000','published prize is fixed for that day');assert.equal(same.rush_tokens,'10.5');
+  assert.equal(ensureRound(app.db,2,active,ROUND_MS).tokens,'900000','new budget applies next day');
+  assert.throws(()=>configFromEnv({VAULT_WALLET:vault,REWARDS_ENABLED:'true',RUSH_PRIZE_POOL:'1'}),/RUSH_MINT/);
+});
+
+test('top ten unique wallets share both pools exactly; finalized transfers settle each token and cannot be reused',async()=>{
+  const rewards=require('./rewards.cjs');
+  const vault=encode58(Buffer.alloc(32,44)),rush=encode58(Buffer.alloc(32,45));
+  const config=configFromEnv({VAULT_WALLET:vault,RUSH_MINT:rush,REWARDS_ENABLED:'true',CATOSHI_PRIZE_POOL:'100000',RUSH_PRIZE_POOL:'10.5'});
+  const db=openDatabase(':memory:');const now=ROUND_MS*2+GRACE_MS+1000;
+  const wallet=i=>encode58(Buffer.alloc(32,i));
+  const insert=(id,i,score,round=1)=>db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine,score,distance,coins,submitted)VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(id,'session'+id,1,'Player '+i,wallet(i),'holder',round,1,ROUND_MS*2,security.ENGINE_VERSION,score,100,1,100+i);
+  const balance=async(address,mint)=>({raw:address===vault?(mint===security.MINT?1000000000000n:1000000000n):50000000000n,decimals:6,whole:'50000',eligible:true});
+  try{
+    rewards.ensureRound(db,1,config,ROUND_MS);
+    for(let i=1;i<=12;i++)insert('run'+i,i,2000-i);
+    insert('duplicate',1,3000);
+    const plan=await rewards.makeTop10Plan(db,1,config,{now:()=>now,balance});assert.equal(plan.payments.length,20);
+    assert.equal(new Set(plan.payments.map(p=>p.wallet)).size,10);assert.equal(plan.payments[0].run_id,'duplicate');
+    const cat=plan.payments.filter(p=>p.symbol==='CATOSHI'),rushPayments=plan.payments.filter(p=>p.symbol==='RUSH');
+    assert.equal(cat.reduce((s,p)=>s+BigInt(p.raw),0n),100000000000n);assert.equal(rushPayments.reduce((s,p)=>s+BigInt(p.raw),0n),10500000n);
+    assert.equal(cat[0].raw,'30000000000');assert.equal(cat[9].raw,'2000000000');
+    db.prepare('INSERT INTO rounds VALUES(?,?,?,?,?)').run(3,ROUND_MS*3,ROUND_MS*4,'100000',vault);insert('legacy',13,700,3);
+    await assert.rejects(makePlan(db,3,config,{now:()=>ROUND_MS*4+GRACE_MS+1000,balance:async address=>({...await balance(address,security.MINT),raw:100000000000n})}),/unreserved/,'legacy planning cannot spend a new top-10 reservation');
+    assert.deepEqual((await rewards.makeTop10Plan(db,1,config,{now:()=>now,balance})).payments,plan.payments,'plan is idempotent');
+    rewards.ensureRound(db,2,config,ROUND_MS);insert('next',12,500,2);
+    await assert.rejects(rewards.makeTop10Plan(db,2,config,{now:()=>ROUND_MS*3+GRACE_MS+1000,balance:async(a,m)=>({...await balance(a,m),raw:m===security.MINT?100000000000n:10500000n})}),/unreserved/);
+    assert.equal(db.prepare('SELECT COUNT(*) count FROM reward_plans WHERE round=2').get().count,0);
+    const entry=(owner,mint,raw)=>({owner,mint,uiTokenAmount:{amount:String(raw),decimals:6}});
+    const pre=[entry(vault,security.MINT,1000000000000n),entry(vault,rush,1000000000n),...plan.payments.map(p=>entry(p.wallet,p.mint,p.symbol==='CATOSHI'?50000000000n:0n))];
+    const post=[entry(vault,security.MINT,900000000000n),entry(vault,rush,989500000n),...plan.payments.map(p=>entry(p.wallet,p.mint,(p.symbol==='CATOSHI'?50000000000n:0n)+BigInt(p.raw)))];
+    const tx={blockTime:Math.floor(now/1000),meta:{err:null,preTokenBalances:pre,postTokenBalances:post}};
+    const signature=encode58(Buffer.alloc(64,10));
+    await assert.rejects(rewards.recordTop10Payment(db,1,'CATOSHI',signature,config,{transaction:async()=>({...tx,meta:{...tx.meta,err:'failed'}})}),/successful/);
+    const paid=await rewards.recordTop10Payment(db,1,'CATOSHI',signature,config,{transaction:async()=>tx,now:()=>now});assert.equal(paid.payments.filter(p=>p.status==='paid').length,10);
+    const both=await rewards.recordTop10Payment(db,1,'RUSH',signature,config,{transaction:async()=>tx,now:()=>now});assert(both.payments.every(p=>p.status==='paid'),'one batch may settle both tokens');
+    await assert.rejects(rewards.recordTop10Payment(db,1,'CATOSHI',signature,config,{transaction:async()=>tx}),/pending/);
+    const fewer=await rewards.makeTop10Plan(db,2,config,{now:()=>ROUND_MS*3+GRACE_MS+1000,balance});assert.equal(fewer.payments.length,2);assert.equal(fewer.payments[0].rank,1);
+    assert.equal(fewer.payments.find(p=>p.symbol==='CATOSHI').raw,'100000000000','sole winner receives full configured pool');
+    await assert.rejects(rewards.recordTop10Payment(db,2,'CATOSHI',signature,config,{transaction:async()=>tx}),/already/);
+  }finally{db.close();}
 });

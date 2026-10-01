@@ -6,6 +6,7 @@ const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
 const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tokenBalance,escapeHtml}=require('./security.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
+const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const ROUND_MS=86400000,GRACE_MS=660000;
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['engine.js','text/javascript'],
@@ -26,35 +27,38 @@ function openDatabase(filename) {
     CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY,session TEXT NOT NULL,seed INTEGER NOT NULL,name TEXT NOT NULL,wallet TEXT,mode TEXT NOT NULL,round INTEGER NOT NULL,started INTEGER NOT NULL,expires INTEGER NOT NULL,engine TEXT NOT NULL,ticks INTEGER,score INTEGER,distance INTEGER,coins INTEGER,reason TEXT,submitted INTEGER,inputs TEXT,disqualified TEXT);
     CREATE INDEX IF NOT EXISTS runs_ranking ON runs(mode,round,score DESC);
     CREATE INDEX IF NOT EXISTS runs_session ON runs(session,started);
+    CREATE TABLE IF NOT EXISTS round_rewards(round INTEGER PRIMARY KEY,rush_mint TEXT NOT NULL,rush_tokens TEXT NOT NULL,splits TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS reward_plans(round INTEGER PRIMARY KEY,vault TEXT NOT NULL,created INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS reward_payments(id TEXT PRIMARY KEY,round INTEGER NOT NULL,rank INTEGER NOT NULL,run_id TEXT NOT NULL,wallet TEXT NOT NULL,vault TEXT NOT NULL,mint TEXT NOT NULL,symbol TEXT NOT NULL,raw TEXT NOT NULL,decimals INTEGER NOT NULL,status TEXT NOT NULL,signature TEXT,created INTEGER NOT NULL,paid INTEGER,UNIQUE(round,rank,mint));
+    CREATE TABLE IF NOT EXISTS reward_transactions(signature TEXT NOT NULL,round INTEGER NOT NULL,mint TEXT NOT NULL,recorded INTEGER NOT NULL,PRIMARY KEY(signature,mint));
     CREATE TABLE IF NOT EXISTS payouts(round INTEGER PRIMARY KEY,run_id TEXT UNIQUE NOT NULL,wallet TEXT NOT NULL,vault TEXT NOT NULL,raw TEXT NOT NULL,decimals INTEGER NOT NULL,status TEXT NOT NULL,signature TEXT UNIQUE,created INTEGER NOT NULL,paid INTEGER);
   `);
   return db;
 }
 function configFromEnv(env=process.env) {
   const production=env.NODE_ENV==='production';
-  const origin=env.PUBLIC_ORIGIN||'http://localhost:3000';
+  const origin=env.PUBLIC_ORIGIN||(env.RAILWAY_PUBLIC_DOMAIN?'https://'+env.RAILWAY_PUBLIC_DOMAIN:'http://localhost:3000');
   const url=new URL(origin);
   if(url.origin!==origin||!['http:','https:'].includes(url.protocol)||(production&&url.protocol!=='https:'))throw new Error('PUBLIC_ORIGIN must be an exact HTTPS origin in production, with no trailing slash.');
   const database=env.DATABASE_PATH||path.join(env.RAILWAY_VOLUME_MOUNT_PATH||'./data','catoshi.sqlite');
   if(production&&!env.RAILWAY_VOLUME_MOUNT_PATH&&!env.DATABASE_PATH)throw new Error('Attach a persistent Railway volume, or set DATABASE_PATH on persistent storage.');
-  const vault=env.VAULT_WALLET||'';if(vault)walletAddress(vault);
-  const tokens=env.PRIZES_ENABLED==='true'?(env.JACKPOT_TOKENS_PER_ROUND||'100000'):'0';
-  if(!/^\d{1,20}$/.test(tokens))throw new Error('JACKPOT_TOKENS_PER_ROUND must be a whole token amount.');
-  if(env.PRIZES_ENABLED==='true'&&(!vault||BigInt(tokens)<1n))throw new Error('Prize mode requires a vault public wallet and a positive per-round budget.');
-  return {production,origin,database,vault,tokens,rpc:env.SOLANA_RPC_URL||'https://solana-rpc.publicnode.com',rpcFallback:env.SOLANA_RPC_FALLBACK_URL||(env.SOLANA_RPC_URL==='https://api.mainnet-beta.solana.com'?'https://solana-rpc.publicnode.com':'https://api.mainnet-beta.solana.com'),port:Number(env.PORT||3000)};
+  const rewards=rewardSettings(env);
+  const {vault,tokens}=rewards;
+  return {production,origin,database,vault,tokens,rewards,rpc:env.SOLANA_RPC_URL||'https://solana-rpc.publicnode.com',rpcFallback:env.SOLANA_RPC_FALLBACK_URL||(env.SOLANA_RPC_URL==='https://api.mainnet-beta.solana.com'?'https://solana-rpc.publicnode.com':'https://api.mainnet-beta.solana.com'),port:Number(env.PORT||3000)};
 }
 function createApp(config,options={}) {
   const db=options.db||openDatabase(config.database),now=options.now||Date.now;
-  const fetchBalance=options.balance||((address)=>tokenBalance(address,[config.rpc,config.rpcFallback].filter(Boolean)));
+  const fetchBalance=(address,mint)=>options.assetBalance?options.assetBalance(address,mint):mint===MINT&&options.balance?options.balance(address):tokenBalance(address,[config.rpc,config.rpcFallback].filter(Boolean),undefined,mint);
   const balances=new Map();
-  async function balance(address){
-    const cached=balances.get(address);
+  async function balance(address,mint=MINT){
+    const key=mint+':'+address;
+    const cached=balances.get(key);
     if(cached&&cached.expires>now())return cached.promise;
     if(balances.size>=500){for(const [key,value]of balances)if(value.expires<=now())balances.delete(key);}
     if(balances.size>=500)balances.delete(balances.keys().next().value);
     const entry={expires:now()+15000,promise:null};
-    entry.promise=Promise.resolve().then(()=>fetchBalance(address)).catch(error=>{if(balances.get(address)===entry)balances.delete(address);throw error;});
-    balances.set(address,entry);return entry.promise;
+    entry.promise=Promise.resolve().then(()=>fetchBalance(address,mint)).catch(error=>{if(balances.get(key)===entry)balances.delete(key);throw error;});
+    balances.set(key,entry);return entry.promise;
   }
   const limits=new Map();let vaultCache=null,lastCleanup=0;
   function cleanup(){
@@ -97,6 +101,19 @@ function createApp(config,options={}) {
   function ranking(mode,round){
     return db.prepare(`SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
   }
+  function siteOrigin(req){
+    // Use the request Host, not an arbitrary X-Forwarded-Host supplied by a client.
+    const host=req.headers.host;
+    if(typeof host!=='string'||host.includes(',')||/[\s/\\@]/.test(host))return config.origin;
+    try{return new URL((config.production?'https:':'http:')+'//'+host).origin;}catch{return config.origin;}
+  }
+  function sameOrigin(req){
+    const origin=req.headers.origin;
+    if(!origin||origin==='null')return false;
+    if(req.headers['sec-fetch-site']&&req.headers['sec-fetch-site']!=='same-origin')return false;
+    try{if(new URL(origin).origin!==origin)return false;}catch{return false;}
+    return origin===config.origin||origin===siteOrigin(req);
+  }
   const server=http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
@@ -106,10 +123,12 @@ function createApp(config,options={}) {
       if(req.method==='GET'&&url.pathname==='/health'){json(res,{ok:true});return;}
       if(url.pathname.startsWith('/api/')){
         rate(req,'api',180);
-        if(req.method==='POST'&&req.headers.origin!==config.origin)throw new HttpError(403,'Same-origin request required.');
+        if(req.method==='POST'&&!sameOrigin(req))throw new HttpError(403,'Same-origin request required.');
         if(req.method==='GET'&&url.pathname==='/api/config'){
           const round=Math.floor(now()/ROUND_MS);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:50000,vault:config.vault,prizesEnabled:BigInt(config.tokens)>0n,payoutMode:'manual-review',jackpotTokens:config.tokens,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          const snapshot=ensureRound(db,round,config,ROUND_MS);
+          const rewards=publicRewards(snapshot,config);
+          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:50000,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode=url.searchParams.get('mode')==='holder'?'holder':'practice';
@@ -119,8 +138,19 @@ function createApp(config,options={}) {
         }
         if(req.method==='GET'&&url.pathname==='/api/vault'){
           if(!config.vault){json(res,{configured:false,payoutMode:'manual-review'});return;}
-          if(!vaultCache||now()-vaultCache.at>30000){const value=await balance(config.vault);vaultCache={at:now(),value};}
-          json(res,{configured:true,address:config.vault,tokens:vaultCache.value.whole,mint:MINT,payoutMode:'manual-review'});return;
+          if(!vaultCache||now()-vaultCache.at>30000){
+            const mint=config.rewards?.rushMint||'';
+            const assets=[{symbol:'CATOSHI',mint:MINT},...(mint?[{symbol:'RUSH',mint}]:[])];
+            const results=await Promise.allSettled(assets.map(asset=>balance(config.vault,asset.mint)));
+            const values=assets.map((asset,i)=>{
+              if(results[i].status!=='fulfilled')return {...asset,available:false,tokens:null};
+              const value=results[i].value;
+              return {...asset,available:true,tokens:typeof value.raw==='bigint'?fromRaw(value.raw,value.decimals):value.whole};
+            });
+            vaultCache={at:now(),value:values};
+          }
+          const catoshi=vaultCache.value.find(asset=>asset.symbol==='CATOSHI');
+          json(res,{configured:true,address:config.vault,tokens:catoshi.tokens,mint:MINT,assets:vaultCache.value,updatedAt:vaultCache.at,payoutMode:'manual-review'});return;
         }
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
@@ -141,7 +171,7 @@ function createApp(config,options={}) {
           }
           if(db.prepare('SELECT COUNT(*) count FROM runs WHERE session=? AND started>?').get(user.id,now()-3600000).count>=120)throw new HttpError(429,'Hourly run limit reached.');
           const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
-          db.prepare('INSERT OR IGNORE INTO rounds VALUES(?,?,?,?,?)').run(round,round*ROUND_MS,(round+1)*ROUND_MS,config.tokens,config.vault);
+          ensureRound(db,round,config,ROUND_MS);
           db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
           json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS});return;
         }
@@ -149,7 +179,7 @@ function createApp(config,options={}) {
           rate(req,'finishes',12,user.id);
           const saved=db.prepare('SELECT * FROM runs WHERE id=? AND session=?').get(String(data.id||''),user.id);
           if(!saved)throw new HttpError(404,'Run not found.');
-          if(saved.submitted!==null){json(res,{run:publicRun(saved),duplicate:true,url:config.origin+'/score/'+saved.id});return;}
+          if(saved.submitted!==null){json(res,{run:publicRun(saved),duplicate:true,url:siteOrigin(req)+'/score/'+saved.id});return;}
           if(saved.expires<now())throw new HttpError(410,'This run expired. Start a new run.');
           if(saved.engine!==ENGINE_VERSION)throw new HttpError(409,'The engine changed; please start a new run.');
           if(!Number.isInteger(data.ticks)||data.ticks>Math.floor((now()-saved.started+2000)/1000*120))throw new HttpError(400,'Run elapsed time is invalid.');
@@ -159,7 +189,7 @@ function createApp(config,options={}) {
           const record=db.prepare('SELECT * FROM runs WHERE id=?').get(saved.id);
           const ranks=ranking(saved.mode,saved.mode==='holder'?saved.round:-1);
           const rank=ranks.findIndex(run=>run.id===saved.id)+1;
-          json(res,{run:publicRun(record),rank:rank||null,url:config.origin+'/score/'+saved.id});return;
+          json(res,{run:publicRun(record),rank:rank||null,url:siteOrigin(req)+'/score/'+saved.id});return;
         }
         throw new HttpError(404,'Not found.');
       }
@@ -171,7 +201,7 @@ function createApp(config,options={}) {
         const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
         if(!run)throw new HttpError(404,'Score not found.');
         const title=escapeHtml(`${run.name} scored ${run.score.toLocaleString()} in Catoshi Vault Rush`);
-        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode} run"><meta property="og:image" content="${config.origin}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
         filename='index.html';
       }
       if(!STATIC_FILES.has(filename))throw new HttpError(404,'Not found.');

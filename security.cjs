@@ -61,15 +61,15 @@ async function rpc(url,method,params,fetcher=fetch) {
   }
   throw new HttpError(503,'Token balance check is temporarily unavailable. Please retry shortly; practice is available without a wallet.');
 }
-async function tokenBalance(address,url,fetcher=fetch) {
-  walletAddress(address);
-  const result=await rpc(url,'getTokenAccountsByOwner',[address,{mint:MINT},{encoding:'jsonParsed',commitment:'finalized'}],fetcher);
+async function tokenBalance(address,url,fetcher=fetch,mint=MINT) {
+  walletAddress(address);walletAddress(mint);
+  const result=await rpc(url,'getTokenAccountsByOwner',[address,{mint},{encoding:'jsonParsed',commitment:'finalized'}],fetcher);
   if(!Array.isArray(result?.value))throw new HttpError(503,'Invalid token balance response.');
   let raw=0n,decimals=null;
   for(const entry of result.value){
     const info=entry.account?.data?.parsed?.info;
     const amount=info?.tokenAmount;
-    if(!amount||info.mint!==MINT||info.owner!==address||!/^\d+$/.test(amount.amount)||!Number.isInteger(amount.decimals)||amount.decimals<0||amount.decimals>18)throw new HttpError(503,'Invalid token balance response.');
+    if(!amount||info.mint!==mint||info.owner!==address||!/^\d+$/.test(amount.amount)||!Number.isInteger(amount.decimals)||amount.decimals<0||amount.decimals>18)throw new HttpError(503,'Invalid token balance response.');
     if(decimals!==null&&decimals!==amount.decimals)throw new HttpError(503,'Inconsistent token balance.');
     decimals=amount.decimals;raw+=BigInt(amount.amount);
   }

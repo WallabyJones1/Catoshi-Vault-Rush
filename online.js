@@ -2,7 +2,7 @@
   'use strict';
   const $=id=>document.getElementById(id);
   const ENGINE='flow-web-3';
-  let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardMode='practice',boardRound=null,previousFocus=null;
+  let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardMode='practice',boardRound=null,previousFocus=null,vaultTimer=null;
   async function api(endpoint,data,timeout=12000){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),timeout);
@@ -20,12 +20,34 @@
       if(value.engine!==ENGINE||(typeof VaultRush!=='undefined'&&VaultRush.VERSION!==ENGINE))throw Error('Please reload to get the current game version.');
       config=value;
       $('practice-note').textContent='Practice board · no token rewards';
+      const rewards=value.rewards;
       $('vault-status').textContent=value.vault
-        ?'Vault '+value.vault.slice(0,4)+'…'+value.vault.slice(-4)+' · '+(value.prizesEnabled?value.jackpotTokens+' CATOSHI daily budget · manual payout review':'rewards not enabled')
-        :'Payout vault not configured · rewards not enabled';
+        ?'Vault '+value.vault.slice(0,4)+'…'+value.vault.slice(-4)+' · '+(value.prizesEnabled?'rewards enabled · team payout review':'rewards off')
+        :'Team vault not configured · rewards off';
+      const pool=rewards?tokenText(rewards.catoshiPool)+' CATOSHI'+(Number(rewards.rushPool)>0?' + '+tokenText(rewards.rushPool)+' RUSH':''):value.jackpotTokens+' CATOSHI';
+      $('prize-pool').textContent=value.prizesEnabled?pool:'REWARDS OFF';
+      $('reward-rule').textContent=value.prizesEnabled
+        ?'Daily top 10 holder wallets · '+(rewards?.split||[30,20,12,10,8,6,5,4,3,2]).join(' / ')+'% · team reviews payouts'
+        :'Free holder play · daily prizes can be enabled by the team';
+      refreshVault();
+      if(!vaultTimer)vaultTimer=setInterval(()=>{if(!document.hidden)refreshVault();},30000);
       return value;
     }).catch(error=>{configPromise=null;throw error;});
     return configPromise;
+  }
+  function tokenText(value){
+    const [whole,fraction]=String(value??'0').split('.');
+    return whole.replace(/\B(?=(\d{3})+(?!\d))/g,',')+(fraction?'.'+fraction:'');
+  }
+  async function refreshVault(){
+    try{
+      const value=await api('vault',null,12000);
+      if(!value.configured){$('vault-balance').textContent='—';$('rush-balance').textContent='';return;}
+      const cat=value.assets?.find(asset=>asset.symbol==='CATOSHI');
+      $('vault-balance').textContent=cat?.available||value.tokens!==null&&value.tokens!==undefined?tokenText(cat?.tokens??value.tokens):'UNAVAILABLE';
+      const rush=value.assets?.find(asset=>asset.symbol==='RUSH');
+      $('rush-balance').textContent=rush?'RUSH in vault: '+(rush.available?tokenText(rush.tokens):'unavailable'):'';
+    }catch{ $('vault-balance').textContent='UNAVAILABLE';$('rush-balance').textContent='Vault balance could not refresh'; }
   }
   function name(){return $('player-name').value.trim()||'Runner';}
   async function prepare(practice){
@@ -78,7 +100,7 @@
         ?'Updated '+new Date(value.updatedAt).toLocaleTimeString()+' · best run per player'
         :'No scores yet. Be the first to finish a run.';
       $('leaderboard-explainer').textContent=boardMode==='holder'
-        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · pasted reward wallet + 50K holdings · scores checked by replay. Any prize requires manual review.'
+        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · best score per reward wallet · 50K holdings · top 10 share enabled prizes after team review.'
         :'All-time practice · no token rewards. Names are public; duplicate names are possible.';
     }catch(_){$('leaderboard-status').textContent='Live rankings need the included website server. Offline practice still works.';}
   }
