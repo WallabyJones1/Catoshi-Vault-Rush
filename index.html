@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0a0908">
+  <meta name="description" content="Catoshi Vault Rush — endless downhill token surfing.">
+  <title>Catoshi · Vault Rush</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0908'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23e8a13a'/%3E%3Cpath d='m17 6-7 12h6l-1 8 8-13h-6z' fill='%23f2efe9'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css?v=web-2">
+  <script defer src="engine.js?v=web-2"></script>
+  <script defer src="renderer.js?v=web-2"></script>
+  <script defer src="audio-config.js?v=web-2"></script>
+  <script defer src="sound.js?v=web-2"></script>
+  <script defer src="home.js?v=web-2"></script>
+  <script defer src="online.js?v=web-2"></script>
+  <script defer src="game.js?v=web-2"></script>
+</head>
+<body>
+  <main id="app">
+    <button id="sound-toggle" class="sound-toggle" type="button" aria-pressed="true" aria-label="Mute game audio">SOUND ON</button>
+    <section id="gate" class="screen active" aria-labelledby="gate-title">
+      <div class="gate-landscape" aria-hidden="true"></div>
+      <div class="gate-card">
+        <p class="eyebrow">CATOSHI</p>
+        <div class="brand-lockup"><h1 id="gate-title">VAULT<br><span>RUSH</span></h1><canvas id="home-catoshi" width="320" height="320" aria-hidden="true"></canvas></div>
+        <p class="lede">Take the gold. Ride the hills.<br>Make the landing.</p>
+        <div class="player-field"><label for="player-name">PLAYER NAME <span>PUBLIC ON THE LEADERBOARD</span></label><input id="player-name" maxlength="20" autocomplete="nickname" placeholder="Your name · optional"></div>
+        <button id="practice-button" class="primary" type="button">PLAY PRACTICE</button>
+        <p id="practice-note" class="practice-note">No wallet needed · offline practice has no rewards</p>
+        <button id="leaderboard-button" class="ghost" type="button">LIVE LEADERBOARD</button>
+        <details id="holder-entry">
+          <summary>HOLDER ENTRY <span>50K CATOSHI</span></summary>
+          <button id="connect-wallet" class="ghost" type="button">CONNECT &amp; SIGN TO PLAY</button>
+          <p class="practice-note">Prove ownership with a login message. No tokens move.</p>
+          <form id="wallet-form">
+            <label for="wallet">Solana wallet · balance check only</label>
+            <div class="wallet-row"><input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste wallet address" required><button id="verify-button" type="submit">CHECK</button></div>
+          </form>
+        </details>
+        <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
+        <p id="vault-status" class="practice-note">Payout vault not configured · rewards not enabled</p>
+      </div>
+      <p class="menu-controls">TAP TO JUMP <span>·</span> HOLD IN AIR TO FLIP</p>
+    </section>
+
+    <section id="game-screen" class="screen" aria-label="Vault Rush downhill game">
+      <div class="game-wrap">
+        <div class="game-shell">
+          <canvas id="game" width="960" height="540" tabindex="0" aria-label="Tap or press space to jump; hold while airborne to backflip; release before landing."></canvas>
+          <div class="hud">
+            <div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div>
+            <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span></div>
+          </div>
+          <p id="mode-label" class="mode-label">PRACTICE</p>
+          <div id="trick" class="trick" role="status" aria-live="polite"></div>
+          <p id="warning" class="warning" hidden>LOW SPEED · HOUND NEARBY</p>
+          <div class="speed-readout"><span id="speed">31</span><small>KM/H</small></div>
+          <button id="pause" class="icon-button" type="button" aria-label="Pause game">Ⅱ</button>
+          <div id="countdown" class="countdown"></div>
+          <div id="pause-panel" class="pause-panel" hidden>
+            <p class="eyebrow">TAKE A BREATH</p><h2>PAUSED</h2>
+            <button id="resume" type="button">RESUME</button>
+            <button id="pause-menu" class="ghost" type="button">BACK TO MENU</button>
+          </div>
+        </div>
+        <div class="control-strip">
+          <button id="jump-control" type="button" aria-label="Jump; hold for a backflip">TAP TO JUMP <span>HOLD TO BACKFLIP</span></button>
+          <p>Release before landing.<br><span>SPACE / ↑ on desktop</span></p>
+        </div>
+      </div>
+    </section>
+
+    <section id="result" class="screen result" aria-labelledby="result-title">
+      <div class="result-card">
+        <p class="eyebrow" id="result-kicker">PRACTICE RUN</p>
+        <h2 id="result-title">ONE MORE<br>RUN?</h2>
+        <p id="result-reason" class="result-reason">Crash landing</p>
+        <div class="result-grid">
+          <div><small>DISTANCE</small><strong id="final-distance">0m</strong></div>
+          <div><small>SCORE</small><strong id="final-score">0</strong></div>
+          <div><small>GOLD</small><strong id="final-coins">0</strong></div>
+        </div>
+        <button id="again" class="primary" type="button">RIDE AGAIN</button>
+        <button id="change-wallet" class="ghost" type="button">BACK TO MENU</button>
+        <p id="result-copy" class="practice-note">Practice runs do not earn token rewards.</p>
+        <p id="submission-status" class="status" role="status" aria-live="polite"></p>
+        <div class="share-actions"><a id="share-x" class="share-link" href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST SCORE TO X ↗</a><button id="copy-score" class="ghost" type="button">COPY</button></div>
+        <button id="result-leaderboard" class="ghost" type="button">LIVE LEADERBOARD</button>
+        <p id="share-status" class="status" role="status"></p>
+      </div>
+    </section>
+    <section id="leaderboard-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" hidden>
+      <div class="board-card">
+        <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="leaderboard-title">THE LEADERBOARD</h2></div><button id="close-leaderboard" class="ghost" type="button" aria-label="Close leaderboard">×</button></div>
+        <div class="board-tabs"><button id="board-practice" type="button">PRACTICE</button><button id="board-holder" type="button">HOLDERS · TODAY</button><button id="board-previous" type="button">YESTERDAY</button></div>
+        <p id="leaderboard-explainer" class="practice-note">Scores refresh every 10 seconds. Player names are public.</p>
+        <table class="rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">SCORE</th><th scope="col">DISTANCE</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>
+        <p id="leaderboard-status" class="status" role="status">Loading rankings…</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
