@@ -2,19 +2,22 @@
   'use strict';
   const $=id=>document.getElementById(id);
   const ENGINE='flow-web-3';
-  let config=null,configPromise=null,signedWallet='',lastResult=null,boardTimer=null,boardMode='practice',boardRound=null,previousFocus=null;
+  let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardMode='practice',boardRound=null,previousFocus=null;
   async function api(endpoint,data,timeout=12000){
-    const response=await fetch('/api/'+endpoint,{
+    const controller=new AbortController();
+    const timer=setTimeout(()=>controller.abort(),timeout);
+    let response;
+    try{response=await fetch('/api/'+endpoint,{
       method:data?'POST':'GET',credentials:'same-origin',headers:data?{'Content-Type':'application/json'}:{},
-      body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(timeout)
-    });
+      body:data?JSON.stringify(data):undefined,signal:controller.signal
+    });}finally{clearTimeout(timer);}
     let value;try{value=await response.json();}catch{throw Error('The leaderboard server is not available here.');}
     if(!response.ok)throw Error(value.error||'Request failed.');return value;
   }
   async function getConfig(){
     if(config)return config;
     if(!configPromise)configPromise=api('config',null,2500).then(value=>{
-      if(value.engine!==ENGINE)throw Error('Please reload to get the current game version.');
+      if(value.engine!==ENGINE||(typeof VaultRush!=='undefined'&&VaultRush.VERSION!==ENGINE))throw Error('Please reload to get the current game version.');
       config=value;
       $('practice-note').textContent='Practice board · no token rewards';
       $('vault-status').textContent=value.vault
@@ -28,10 +31,10 @@
   async function prepare(practice){
     try{
       await getConfig();
-      return await api('runs/start',{name:name(),mode:practice?'practice':'holder',engine:ENGINE});
+      return await api('runs/start',{name:name(),mode:practice?'practice':'holder',engine:ENGINE,...(!practice?{wallet:entryWallet}:{})});
     }catch(error){
       // Static/offline practice is deliberately independent of the server.
-      if(practice&&!config)return null;
+      if(practice){$('practice-note').textContent='Local practice · leaderboard unavailable for this run';return null;}
       throw error;
     }
   }
@@ -75,7 +78,7 @@
         ?'Updated '+new Date(value.updatedAt).toLocaleTimeString()+' · best run per player'
         :'No scores yet. Be the first to finish a run.';
       $('leaderboard-explainer').textContent=boardMode==='holder'
-        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · signed wallet + 50K holdings · scores checked by replay. Any prize requires manual review.'
+        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · pasted reward wallet + 50K holdings · scores checked by replay. Any prize requires manual review.'
         :'All-time practice · no token rewards. Names are public; duplicate names are possible.';
     }catch(_){$('leaderboard-status').textContent='Live rankings need the included website server. Offline practice still works.';}
   }
@@ -107,26 +110,6 @@
     if(document.hidden){clearInterval(boardTimer);boardTimer=null;}
     else if(!$('leaderboard-panel').hidden){board();boardTimer=setInterval(board,10000);}
   });
-  $('connect-wallet').addEventListener('click',async()=>{
-    const button=$('connect-wallet'),message=$('wallet-status');button.disabled=true;
-    try{
-      await getConfig();
-      const provider=window.phantom?.solana||window.solflare||window.solana;
-      if(!provider||typeof provider.signMessage!=='function')throw Error("Open this website inside your Phantom wallet browser to join the holder board. Practice works in any browser.");
-      const connected=await provider.connect(),wallet=(connected?.publicKey||provider.publicKey).toString();
-      const challenge=await api('auth/challenge',{wallet});
-      message.textContent='Approve the login message in your wallet. No tokens will move.';
-      const signed=await provider.signMessage(new TextEncoder().encode(challenge.message),'utf8');
-      const signature=btoa(String.fromCharCode(...signed.signature));
-      await api('auth/verify',{id:challenge.id,signature});signedWallet=wallet;$('wallet').value=wallet;
-      message.textContent='Wallet ownership verified. Checking 50K CATOSHI…';
-      const balance=await api('balance',{wallet});
-      if(!balance.eligible)throw Error(balance.tokens+' CATOSHI found — 50,000 required.');
-      message.textContent='Verified holder. Your name and shortened wallet will be public.';
-      document.dispatchEvent(new CustomEvent('rush-holder-ready',{detail:{wallet}}));
-    }catch(error){message.textContent=error.message||'Wallet login cancelled.';message.className='status error';}
-    finally{button.disabled=false;}
-  });
-  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance',{wallet}),signedWallet:()=>signedWallet};
+  window.RushOnline={prepare,submit,share,getConfig,balance:wallet=>api('balance',{wallet}),setWallet:wallet=>{entryWallet=wallet;},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();

@@ -28,3 +28,4 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
   .sound-toggle{min-height:36px;top:max(4px,env(safe-area-inset-top));right:12px}
 }
 @media(orientation:landscape) and (max-height:600px){.sound-toggle{top:auto;bottom:8px;right:110px}.hud-right{padding-right:0}}
+@media(max-width:600px){.wallet-row{grid-template-columns:minmax(0,1fr)}#verify-button{width:100%}}

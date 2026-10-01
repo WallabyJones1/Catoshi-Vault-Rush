@@ -1,6 +1,7 @@
 (function () {
   'use strict';
   const $ = id => document.getElementById(id);
+  const sound=window.RushSound||{unlock(){},setPlaying(){},effect(){},burst(){}};
   const screens = Array.from(document.querySelectorAll('.screen'));
   const canvas = $('game');
   const shell = canvas.parentElement;
@@ -33,7 +34,7 @@
     startId++; walletRequest++;
     cancelAnimationFrame(raf); releaseInput();
     phase = 'menu'; ui['pause-panel'].hidden = true;
-    window.RushSound.setPlaying(false);
+    sound.setPlaying(false);
     ui.countdown.textContent = ''; ui['verify-button'].disabled = false;
     show('gate');
   }
@@ -57,7 +58,7 @@
     return artwork;
   }
   async function begin(isPractice = practice) {
-    window.RushSound.unlock(); window.RushSound.setPlaying(false);
+    sound.unlock(); sound.setPlaying(false);
     const operation = ++startId;
     walletRequest++;
     ui['verify-button'].disabled = false;
@@ -65,7 +66,7 @@
     phase = 'loading'; practice = isPractice;
     ui['pause-panel'].hidden = true; ui.warning.hidden = true;
     ui.trick.classList.remove('visible'); ui.trick.textContent = '';
-    ui['mode-label'].textContent = practice ? 'PRACTICE' : 'VERIFIED HOLDER RUN';
+    ui['mode-label'].textContent = practice ? 'PRACTICE' : 'HOLDER RUN';
     ui.countdown.textContent = 'LOADING';
     show('game-screen'); resizeGame(); drawLoading();
     try {
@@ -73,9 +74,11 @@
       const [images,onlineTicket] = await Promise.all([artworkReady(),window.RushOnline.prepare(isPractice)]);
       if (operation !== startId) return;
       setRunTicket(onlineTicket);
+      if(onlineTicket?.wallet)wallet=onlineTicket.wallet;
+      ui['mode-label'].textContent=practice?(onlineTicket?'PRACTICE':'LOCAL PRACTICE · NO LEADERBOARD'):'HOLDER RUN';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = new VaultRush.Run(onlineTicket?.seed||Date.now()); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
-      window.RushSound.setPlaying(true);
+      sound.setPlaying(true);
       phase = 'countdown'; countdown = 1.7; accumulator = 0; trickTime = 0;
       ui.countdown.textContent = 'READY';
       updateHud(); last = performance.now();
@@ -99,7 +102,7 @@
   function events() {
     for (const event of run.drainEvents()) {
       renderer.handle(event);
-      window.RushSound.effect(event);
+      sound.effect(event);
       if (event.type === 'trick') {
         ui.trick.textContent = event.text;
         if (event.points) {
@@ -114,7 +117,7 @@
   }
   function finish() {
     phase = 'result'; releaseInput();
-    window.RushSound.setPlaying(false);
+    sound.setPlaying(false);
     ui['final-distance'].textContent = Math.floor(run.player.x / 10) + 'm';
     ui['final-score'].textContent = Math.floor(run.score).toLocaleString();
     ui['final-coins'].textContent = run.coins;
@@ -122,7 +125,7 @@
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
     ui['result-copy'].textContent = practice
       ? 'Practice runs do not earn token rewards.'
-      : 'Signed wallet '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Any prize requires manual review and payment by the team.';
+      : 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Any prize requires manual review and payment by the team.';
     ui['submission-status']=$('submission-status');
     $('share-status').textContent='';
     window.RushOnline.share(run,practice,null);
@@ -139,7 +142,7 @@
     if (phase === 'countdown') {
       const before=countdown;
       countdown -= dt;
-      if(before>1.08&&countdown<=1.08)window.RushSound.burst();
+      if(before>1.08&&countdown<=1.08)sound.burst();
       ui.countdown.textContent = countdown > 1.08 ? 'READY' : countdown > .5 ? 'BREAK OUT' : 'RUSH';
       if (countdown <= 0) { phase = 'running'; ui.countdown.textContent = ''; accumulator = 0; }
     } else if (phase === 'running') {
@@ -164,13 +167,13 @@
     if (phase === 'paused') return;
     if (phase !== 'running' && phase !== 'countdown') return;
     resumePhase = phase; phase = 'paused'; releaseInput(); accumulator = 0;
-    window.RushSound.setPlaying(false);
+    sound.setPlaying(false);
     ui['pause-panel'].hidden = false; ui.countdown.textContent = '';
   }
   function resume() {
     if (phase !== 'paused') return;
     phase = resumePhase; ui['pause-panel'].hidden = true;
-    window.RushSound.unlock(); window.RushSound.setPlaying(true);
+    sound.unlock(); sound.setPlaying(true);
     last = performance.now(); accumulator = 0;
     canvas.focus({ preventScroll: true });
   }
@@ -198,7 +201,7 @@
     element.addEventListener('contextmenu',event => event.preventDefault());
   }
 
-  // Practice and holder login are independent; pasted addresses cannot prove ownership.
+  // Holder entry needs a balance check only; rewards are bound to the pasted address.
   $('practice-button').addEventListener('click',() => begin(true));
   $('again').addEventListener('click',() => begin(practice));
   $('change-wallet').addEventListener('click',backToMenu);
@@ -239,12 +242,12 @@
         status(Number(balance.tokens).toLocaleString() + ' CATOSHI found — 50,000 required. Practice is always available.','error');
         return;
       }
-      status('50K balance confirmed. Connect and sign above to prove this wallet is yours and join the holder board.','success');
-    } catch (_) {
-      if (request === walletRequest && phase === 'menu') status('Live balance verification is unavailable. Play Practice works without a wallet.','error');
+      wallet=address;
+      window.RushOnline.setWallet(address);
+      status(Number(balance.tokens).toLocaleString()+' CATOSHI confirmed. Starting your holder run…','success');
+      await begin(false);
+    } catch (error) {
+      if (request === walletRequest && phase === 'menu') status(error.message||'Token check unavailable. Retry shortly or play practice.','error');
     } finally { if (request === walletRequest) ui['verify-button'].disabled = false; }
-  });
-  document.addEventListener('rush-holder-ready',event=>{
-    if(phase!=='menu')return;wallet=event.detail.wallet;begin(false);
   });
 })();

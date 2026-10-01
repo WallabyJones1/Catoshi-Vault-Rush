@@ -49,10 +49,17 @@ function replay(seed,ticks,inputs) {
   return {score:Math.floor(run.score),distance:Math.floor(run.player.x/10),coins:run.coins,reason:run.reason};
 }
 async function rpc(url,method,params,fetcher=fetch) {
-  try{
-    const response=await fetcher(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(8000)});
-    if(!response.ok)throw new Error();const data=await response.json();if(data.error||!Object.hasOwn(data,'result'))throw new Error();return data.result;
-  }catch{throw new HttpError(503,'Solana verification is unavailable. Please retry, or play practice.');}
+  const urls=Array.isArray(url)?url:[url];
+  for(const endpoint of [...new Set(urls)]){
+    try{
+      const response=await fetcher(endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({jsonrpc:'2.0',id:1,method,params}),signal:AbortSignal.timeout(3500)});
+      if(!response.ok)continue;
+      const data=await response.json();
+      if(data.error||!Object.hasOwn(data,'result'))continue;
+      return data.result;
+    }catch{ /* Retry only configured/public RPC endpoints; never trust a failed check. */ }
+  }
+  throw new HttpError(503,'Token balance check is temporarily unavailable. Please retry shortly; practice is available without a wallet.');
 }
 async function tokenBalance(address,url,fetcher=fetch) {
   walletAddress(address);

@@ -4,7 +4,7 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
-const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,verifyMessage,hash,replay,tokenBalance,escapeHtml}=require('./security.cjs');
+const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tokenBalance,escapeHtml}=require('./security.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
 const ROUND_MS=86400000,GRACE_MS=660000;
 const STATIC_FILES=new Map([
@@ -41,11 +41,21 @@ function configFromEnv(env=process.env) {
   const tokens=env.PRIZES_ENABLED==='true'?(env.JACKPOT_TOKENS_PER_ROUND||'100000'):'0';
   if(!/^\d{1,20}$/.test(tokens))throw new Error('JACKPOT_TOKENS_PER_ROUND must be a whole token amount.');
   if(env.PRIZES_ENABLED==='true'&&(!vault||BigInt(tokens)<1n))throw new Error('Prize mode requires a vault public wallet and a positive per-round budget.');
-  return {production,origin,database,vault,tokens,rpc:env.SOLANA_RPC_URL||'https://api.mainnet-beta.solana.com',port:Number(env.PORT||3000)};
+  return {production,origin,database,vault,tokens,rpc:env.SOLANA_RPC_URL||'https://solana-rpc.publicnode.com',rpcFallback:env.SOLANA_RPC_FALLBACK_URL||(env.SOLANA_RPC_URL==='https://api.mainnet-beta.solana.com'?'https://solana-rpc.publicnode.com':'https://api.mainnet-beta.solana.com'),port:Number(env.PORT||3000)};
 }
 function createApp(config,options={}) {
   const db=options.db||openDatabase(config.database),now=options.now||Date.now;
-  const balance=options.balance||((address)=>tokenBalance(address,config.rpc));
+  const fetchBalance=options.balance||((address)=>tokenBalance(address,[config.rpc,config.rpcFallback].filter(Boolean)));
+  const balances=new Map();
+  async function balance(address){
+    const cached=balances.get(address);
+    if(cached&&cached.expires>now())return cached.promise;
+    if(balances.size>=500){for(const [key,value]of balances)if(value.expires<=now())balances.delete(key);}
+    if(balances.size>=500)balances.delete(balances.keys().next().value);
+    const entry={expires:now()+15000,promise:null};
+    entry.promise=Promise.resolve().then(()=>fetchBalance(address)).catch(error=>{if(balances.get(address)===entry)balances.delete(address);throw error;});
+    balances.set(address,entry);return entry.promise;
+  }
   const limits=new Map();let vaultCache=null,lastCleanup=0;
   function cleanup(){
     const t=now();if(t-lastCleanup<60000)return;lastCleanup=t;
@@ -56,8 +66,8 @@ function createApp(config,options={}) {
     db.prepare('UPDATE runs SET inputs=NULL WHERE started<? AND mode=\'practice\' AND inputs IS NOT NULL AND id NOT IN (SELECT run_id FROM payouts)').run(t-90*86400000);
     for(const [key,value]of limits)if(t-value.at>60000)limits.delete(key);
   }
-  function rate(req,category,max){
-    const key=(req.socket.remoteAddress||'unknown')+':'+category;
+  function rate(req,category,max,identity){
+    const key=(identity||req.socket.remoteAddress||'unknown')+':'+category;
     const t=now();let limit=limits.get(key);
     if(!limit||t-limit.at>60000){limit={at:t,count:0};limits.set(key,limit);}
     if(++limit.count>max)throw new HttpError(429,'Too many requests. Please wait a minute.');
@@ -115,40 +125,28 @@ function createApp(config,options={}) {
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
         if(url.pathname==='/api/balance'){
-          rate(req,'balance',6);const value=await balance(walletAddress(data.wallet));
+          rate(req,'balance',12,user.id);const value=await balance(walletAddress(data.wallet));
           json(res,{tokens:value.whole,eligible:value.eligible,minimumTokens:50000});return;
         }
-        if(url.pathname==='/api/auth/challenge'){
-          rate(req,'auth',10);const address=walletAddress(data.wallet),id=crypto.randomUUID();
-          const message=`Catoshi Vault Rush login\nWebsite: ${config.origin}\nWallet: ${address}\nNonce: ${id}\nExpires: ${new Date(now()+300000).toISOString()}\nThis signature proves wallet ownership only. It does not transfer tokens or authorize payments.`;
-          db.prepare('DELETE FROM challenges WHERE session=?').run(user.id);
-          db.prepare('INSERT INTO challenges VALUES(?,?,?,?,?)').run(id,user.id,address,message,now()+300000);
-          json(res,{id,message});return;
-        }
-        if(url.pathname==='/api/auth/verify'){
-          rate(req,'auth',10);
-          const challenge=db.prepare('SELECT * FROM challenges WHERE id=? AND session=? AND expires>?').get(String(data.id||''),user.id,now());
-          if(!challenge||!verifyMessage(challenge.wallet,challenge.message,data.signature))throw new HttpError(401,'Wallet signature could not be verified.');
-          db.prepare('DELETE FROM challenges WHERE id=?').run(challenge.id);
-          db.prepare('UPDATE sessions SET wallet=?,expires=? WHERE id=?').run(challenge.wallet,now()+3600000,user.id);
-          json(res,{wallet:challenge.wallet});return;
-        }
         if(url.pathname==='/api/runs/start'){
-          rate(req,'starts',12);
+          rate(req,'starts',12,user.id);
           const mode=data.mode==='holder'?'holder':'practice';const name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
-          if(mode==='holder'){
-            if(!user.wallet)throw new HttpError(401,'Connect your own wallet and sign the login message first.');
-            const value=await balance(user.wallet);if(!value.eligible)throw new HttpError(403,'At least 50,000 CATOSHI is required for the holder board.');
+          // Entry checks holdings only. The saved address is the reward recipient,
+          // never a claim of ownership or permission to spend from that wallet.
+          const rewardWallet=mode==='holder'?walletAddress(data.wallet):null;
+          if(rewardWallet){
+            const value=await balance(rewardWallet);
+            if(!value.eligible)throw new HttpError(403,'At least 50,000 CATOSHI is required for the holder board.');
           }
           if(db.prepare('SELECT COUNT(*) count FROM runs WHERE session=? AND started>?').get(user.id,now()-3600000).count>=120)throw new HttpError(429,'Hourly run limit reached.');
           const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
           db.prepare('INSERT OR IGNORE INTO rounds VALUES(?,?,?,?,?)').run(round,round*ROUND_MS,(round+1)*ROUND_MS,config.tokens,config.vault);
-          db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,mode==='holder'?user.wallet:null,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
-          json(res,{id,seed,mode,round,engine:ENGINE_VERSION,maxTicks:MAX_TICKS});return;
+          db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
+          json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS});return;
         }
         if(url.pathname==='/api/runs/finish'){
-          rate(req,'finishes',12);
+          rate(req,'finishes',12,user.id);
           const saved=db.prepare('SELECT * FROM runs WHERE id=? AND session=?').get(String(data.id||''),user.id);
           if(!saved)throw new HttpError(404,'Run not found.');
           if(saved.submitted!==null){json(res,{run:publicRun(saved),duplicate:true,url:config.origin+'/score/'+saved.id});return;}

@@ -85,11 +85,11 @@ test('Ed25519 wallet ownership and exact token balance threshold',async()=>{
   assert.equal(balance.raw,50000000000n);assert.equal(balance.whole,'50000');assert(balance.eligible);
   await assert.rejects(security.tokenBalance(wallet,'https://unused.invalid',async()=>{throw Error('unavailable');}),/unavailable/);
 });
-test('HTTP practice/holder flow, login replay rejection, checked leaderboard, sharing and static isolation',async t=>{
+test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard and static isolation',async t=>{
   let clock=Date.UTC(2026,9,1,1);const keys=crypto.generateKeyPairSync('ed25519');
   const wallet=encode58(keys.publicKey.export({type:'spki',format:'der'}).subarray(-32));
   const config={...configFromEnv(),database:':memory:'};
-  const app=createApp(config,{now:()=>clock,balance:async()=>({raw:100000000000n,decimals:6,whole:'100000',eligible:true})});
+  let balanceCalls=0;const app=createApp(config,{now:()=>clock,balance:async address=>{balanceCalls++;return {raw:100000000000n,decimals:6,whole:address===security.MINT?'49999':'100000',eligible:address!==security.MINT};}});
   await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
   const base='http://127.0.0.1:'+app.server.address().port;config.origin=base;let cookie='';
   t.after(async()=>{await new Promise(resolve=>app.server.close(resolve));app.db.close();});
@@ -101,7 +101,7 @@ test('HTTP practice/holder flow, login replay rejection, checked leaderboard, sh
   assert.equal((await request('/health')).res.status,200);
   const rules=(await request('/api/config')).value;assert.equal(rules.minimumTokens,50000);assert(!rules.prizesEnabled);assert(!rules.paidModeEnabled);
   assert.equal((await request('/api/runs/start',{mode:'practice',engine:security.ENGINE_VERSION},'https://evil.invalid')).res.status,403);
-  assert.equal((await request('/api/runs/start',{mode:'holder',engine:security.ENGINE_VERSION})).res.status,401);
+  assert.equal((await request('/api/runs/start',{mode:'holder',engine:security.ENGINE_VERSION})).res.status,400);
   const ticket=(await request('/api/runs/start',{name:'Cat Runner',mode:'practice',engine:security.ENGINE_VERSION})).value;assert(ticket.id&&ticket.seed);
   const simulation=simulate(ticket.seed);clock+=simulation.ticks/120*1000+2000;
   const result=await request('/api/runs/finish',{id:ticket.id,ticks:simulation.ticks,inputs:simulation.inputs,score:999999999});
@@ -113,13 +113,15 @@ test('HTTP practice/holder flow, login replay rejection, checked leaderboard, sh
   for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png'])assert.equal((await request('/'+file)).res.status,200);
   const range=await fetch(base+'/music.mp3',{headers:{Range:'bytes=0-31'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-length'),'32');assert.equal((await range.arrayBuffer()).byteLength,32);
   const badRange=await fetch(base+'/music.mp3',{headers:{Range:'bytes=999999999999-'}});assert.equal(badRange.status,416);await badRange.arrayBuffer();
-  const challenge=(await request('/api/auth/challenge',{wallet})).value;
-  const signature=crypto.sign(null,Buffer.from(challenge.message),keys.privateKey).toString('base64');
-  assert.equal((await request('/api/auth/verify',{id:challenge.id,signature})).res.status,200);
-  assert.equal((await request('/api/auth/verify',{id:challenge.id,signature})).res.status,401);
-  const holder=(await request('/api/runs/start',{name:'Holder',mode:'holder',engine:security.ENGINE_VERSION})).value;assert.equal(holder.mode,'holder');
+  assert.equal((await request('/api/auth/challenge',{wallet})).res.status,404);
+  assert.equal((await request('/api/runs/start',{name:'Low balance',mode:'holder',wallet:security.MINT,engine:security.ENGINE_VERSION})).res.status,403);
+  const checkedBalance=(await request('/api/balance',{wallet})).value;assert(checkedBalance.eligible);
+  const callsBefore=balanceCalls;
+  const holder=(await request('/api/runs/start',{name:'Holder',mode:'holder',wallet,engine:security.ENGINE_VERSION})).value;
+  assert.equal(holder.mode,'holder');assert.equal(holder.wallet,wallet);assert.equal(balanceCalls,callsBefore,'entry reuses the recent balance check');
   const holderRun=simulate(holder.seed);clock+=holderRun.ticks/120*1000+2000;
-  assert.equal((await request('/api/runs/finish',{id:holder.id,ticks:holderRun.ticks,inputs:holderRun.inputs})).res.status,200);
+  assert.equal((await request('/api/runs/finish',{id:holder.id,ticks:holderRun.ticks,inputs:holderRun.inputs,wallet:security.MINT})).res.status,200);
+  assert.equal(app.db.prepare('SELECT wallet FROM runs WHERE id=?').get(holder.id).wallet,wallet,'finish cannot redirect the reward address');
   const holders=(await request('/api/leaderboard?mode=holder')).value;assert.equal(holders.entries[0].name,'Holder');assert.notEqual(holders.entries[0].wallet,wallet);
   assert.equal((await request('/api/runs/finish',{id:holder.id},base,'')).res.status,404);
 });
@@ -162,7 +164,7 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
   const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
   document.querySelectorAll=()=>['gate','game-screen','result'].map(id=>elements[id]);document.createElement=tag=>new Element(tag);
   elements.game.getContext=()=>({fillRect(){}});let now=0,frame=null,createdRun,bursts=0,sounds=0;
-  window.RushOnline={prepare:async()=>null,balance:async()=>{throw Error('offline');},submit:async()=>null,share(){}};
+  window.RushOnline={prepare:async()=>null,balance:async()=>{throw Error('offline');},submit:async()=>null,share(){},setWallet(){}};
   window.RushSound={unlock(){},setPlaying(){},effect(){sounds++;},burst(){bursts++;}};
   const context={document,window,console,setTimeout,clearTimeout,performance:{now:()=>now},VaultRush:{Run:class extends Run{constructor(seed){super(seed);createdRun=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
@@ -175,7 +177,10 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
   const before=createdRun.time;await elements.pause.dispatch('click');frames(100);assert.equal(createdRun.time,before);
   await elements.resume.dispatch('click');frames(10);assert(createdRun.time>before);
   await window.dispatch('keydown',{code:'Space'});assert(createdRun.player.held);await window.dispatch('keyup',{code:'Space'});assert(!createdRun.player.held);
-  await elements['pause-menu'].dispatch('click');elements.wallet.value=security.MINT;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/unavailable/);
+  await elements['pause-menu'].dispatch('click');elements.wallet.value=security.MINT;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/offline/);
+  let selected;window.RushOnline.balance=async()=>({eligible:true,tokens:'50000'});window.RushOnline.setWallet=address=>{selected=address;};
+  await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'HOLDER RUN');
+  await elements['pause-menu'].dispatch('click');
   await elements['practice-button'].dispatch('click');assert(frame);
 });
 test('audio preference and lack of AudioContext cannot block play',async()=>{
@@ -184,4 +189,46 @@ test('audio preference and lack of AudioContext cannot block play',async()=>{
   assert.equal(button.textContent,'SOUND ON');window.RushSound.unlock();window.RushSound.setPlaying(true);window.RushSound.effect({type:'coin'});
   await button.dispatch('click');assert.equal(button.textContent,'SOUND OFF');assert.equal(storage.get('rush-muted'),'1');
   await button.dispatch('click');assert.equal(button.textContent,'SOUND ON');window.RushSound.burst();
+});
+
+test('RPC failover and exact balances never grant entry on failed or malformed responses',async()=>{
+  const wallet=security.MINT,calls=[];
+  const response=amount=>({ok:true,json:async()=>({result:{value:[{account:{data:{parsed:{info:{owner:wallet,mint:security.MINT,tokenAmount:{amount:String(amount),decimals:6}}}}}}]}})});
+  const fallback=await security.tokenBalance(wallet,['https://first.invalid','https://second.invalid'],async url=>{calls.push(url);return url.includes('first')?{ok:false}:response(50000000000n);});
+  assert.deepEqual(calls,['https://first.invalid','https://second.invalid']);assert(fallback.eligible);
+  assert(!(await security.tokenBalance(wallet,'https://unused.invalid',async()=>response(49999999999n))).eligible);
+  assert(!(await security.tokenBalance(wallet,'https://unused.invalid',async()=>({ok:true,json:async()=>({result:{value:[]}})}))).eligible);
+  await assert.rejects(security.tokenBalance(wallet,['https://first.invalid','https://second.invalid'],async()=>{throw Error('blocked');}),/temporarily unavailable/);
+  await assert.rejects(security.tokenBalance(wallet,'https://unused.invalid',async()=>({ok:true,json:async()=>({result:{value:[{}]}})})),/Invalid token/);
+});
+
+test('practice starts locally after a working config but failed start API; holder sends only pasted wallet',async()=>{
+  const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+  assert(!html.includes('CONNECT &amp; SIGN'));assert(html.includes('reward address'));
+  const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element(m[1])]));
+  const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
+  let startsFail=true;const requests=[];
+  const fetcher=async(url,options)=>{
+    requests.push([url,options.body?JSON.parse(options.body):null]);
+    const value=url.endsWith('/config')?{engine:security.ENGINE_VERSION,vault:'',prizesEnabled:false}:url.endsWith('/runs/start')?{id:'test',wallet:security.MINT}:{eligible:true,tokens:'50000'};
+    return {ok:!(startsFail&&url.endsWith('/runs/start')),json:async()=>startsFail&&url.endsWith('/runs/start')?{error:'Unavailable'}:value};
+  };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,AbortController,setTimeout,clearTimeout,setInterval,clearInterval,location:{protocol:'file:'},URLSearchParams,console});
+  assert.equal(await window.RushOnline.prepare(true),null,'API failure must not block practice');
+  assert.match(elements['practice-note'].textContent,/Local practice/);
+  startsFail=false;window.RushOnline.setWallet(security.MINT);
+  const holder=await window.RushOnline.prepare(false);assert.equal(holder.wallet,security.MINT);
+  assert.equal(requests.at(-1)[1].wallet,security.MINT);assert.equal(requests.at(-1)[1].mode,'holder');
+  assert(!requests.some(([url])=>url.includes('/auth/')),'no connection or signature flow');
+});
+
+test('a failed holder balance is not cached as zero or used to authorize a run',async t=>{
+  let broken=true,calls=0;const config={...configFromEnv(),database:':memory:'};
+  const app=createApp(config,{balance:async()=>{calls++;if(broken)throw new security.HttpError(503,'RPC unavailable');return {whole:'50000',eligible:true};}});
+  await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;config.origin=base;
+  t.after(async()=>{await new Promise(resolve=>app.server.close(resolve));app.db.close();});
+  const start=()=>fetch(base+'/api/runs/start',{method:'POST',headers:{'content-type':'application/json',origin:base},body:JSON.stringify({name:'Holder',mode:'holder',engine:security.ENGINE_VERSION,wallet:security.MINT})});
+  const denied=await start();assert.equal(denied.status,503);await denied.arrayBuffer();
+  assert.equal(app.db.prepare('SELECT COUNT(*) AS count FROM runs').get().count,0);
+  broken=false;const accepted=await start();assert.equal(accepted.status,200);assert.equal((await accepted.json()).wallet,security.MINT);assert.equal(calls,2);
 });

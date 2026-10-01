@@ -386,5 +386,5 @@
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  return { Run, clamp, angleDelta, TAU };
+  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-3' };
 });
