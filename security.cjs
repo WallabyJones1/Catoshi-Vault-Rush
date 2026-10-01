@@ -3,7 +3,7 @@ const crypto = require('node:crypto');
 const { Run } = require('./engine.js');
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const MINT = 'HrZh7koZFedTSHng4bVmhULwejpmVdSKUYxaf2N5im1b';
-const ENGINE_VERSION = 'flow-web-4';
+const ENGINE_VERSION = 'flow-web-8';
 const MAX_TICKS = 120 * 600;
 const MAX_INPUTS = 3000;
 class HttpError extends Error { constructor(status,message){super(message);this.status=status;} }
@@ -51,7 +51,7 @@ function replay(seed,ticks,inputs) {
   }
   if(ticks===MAX_TICKS&&!run.dead)run.crash('TIME LIMIT');
   if(!run.dead)throw new HttpError(400,'Only completed runs can enter the leaderboard.');
-  return {score:Math.floor(run.score),distance:Math.floor(run.player.x/10),coins:run.coins,reason:run.reason};
+  return {score:Math.floor(run.score),distance:Math.floor(run.player.x/10),coins:run.coins,redTokens:run.redTokens,rushPickups:run.rushPickups,reason:run.reason};
 }
 const TOKEN_PROGRAMS=new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA','TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb']);
 function rpcEndpoints(url){return [...new Set((Array.isArray(url)?url:[url]).filter(value=>typeof value==='string'&&value.trim()).map(value=>value.trim()))];}

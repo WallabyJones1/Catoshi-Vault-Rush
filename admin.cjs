@@ -3,6 +3,7 @@
 const {openDatabase,configFromEnv,GRACE_MS}=require('./server.cjs');
 const {MINT,decode58,tokenBalance,rpc}=require('./security.cjs');
 const {makeTop10Plan,recordTop10Payment}=require('./rewards.cjs');
+const {syncHolderScores}=require('./quest.cjs');
 async function makePlan(db,roundId,config,dependencies={}) {
   const now=(dependencies.now||Date.now)(),balance=dependencies.balance||((wallet)=>tokenBalance(wallet,[config.rpc,config.rpcFallback].filter(Boolean)));
   const round=db.prepare('SELECT * FROM rounds WHERE id=?').get(roundId);
@@ -43,8 +44,15 @@ async function recordPayment(db,roundId,signature,config,dependencies={}) {
 }
 function disqualify(db,id,reason){
   if(!reason||reason.length<5||reason.length>300)throw Error('Supply a 5–300 character review reason.');
-  if(db.prepare('SELECT round FROM payouts WHERE run_id=? UNION SELECT round FROM reward_payments WHERE run_id=?').get(id,id))throw Error('A payout plan already references this run; review that plan before changing eligibility.');
-  if(db.prepare('UPDATE runs SET disqualified=? WHERE id=? AND submitted IS NOT NULL').run(reason,id).changes!==1)throw Error('Completed run not found.');
+  const run=db.prepare('SELECT wallet,round FROM runs WHERE id=? AND submitted IS NOT NULL').get(id);
+  if(!run)throw Error('Completed run not found.');
+  if(db.prepare('SELECT round FROM payouts WHERE round=? UNION SELECT round FROM reward_plans WHERE round=?').get(run.round,run.round))throw Error('A payout plan already freezes this day; review that plan before changing eligibility.');
+  db.exec('BEGIN IMMEDIATE');
+  try{
+    db.prepare('UPDATE runs SET disqualified=? WHERE id=?').run(reason,id);
+    if(run.wallet)syncHolderScores(db,run.wallet,run.round);
+    db.exec('COMMIT');
+  }catch(error){db.exec('ROLLBACK');throw error;}
 }
 async function main(){
   const [command,id,...rest]=process.argv.slice(2);

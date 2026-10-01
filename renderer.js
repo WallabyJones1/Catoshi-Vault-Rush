@@ -13,7 +13,8 @@
     scenery: 'vault-scenery-atlas.png',
     coin: 'catoshi-coin.png',
     biomes: 'terrain-biomes-v1.png',
-    obstacles: 'terrain-obstacles-v1.png'
+    obstacles: 'terrain-obstacles-v1.png',
+    rush: 'rush-pickups-v2.png'
   };
   // Explicit crops preserve the complete silhouettes, including every token.
   const characters = [
@@ -62,9 +63,16 @@
       this.particles = [];
       this.dust = 0;
       this.landPose = 0;
+      this.impactPose = 0;
+      this.jumpPose = 0;
+      this.flipPulse = 0;
+      this.crashPose = null;
+      this.hitObjects = [];
       this.shake = 0;
       this.intro = 0;
       this.ready = false;
+      this.visualPlayer = null;
+      this.clock = 0;
     }
     resize(run) {
       this.width = this.ctx.canvas?.width || W;
@@ -74,6 +82,11 @@
     reset(run) {
       this.particles = [];
       this.landPose = 0;
+      this.impactPose = this.jumpPose = this.flipPulse = 0;
+      this.crashPose = null;
+      this.hitObjects = [];
+      this.visualPlayer = null;
+      this.clock = 0;
       this.shake = 0;
       this.intro = 0;
       const p = run.player;
@@ -89,9 +102,26 @@
     }
     handle(event) {
       if (event.type === 'coin') this.burst(event.x, event.y, '#e8a13a', 4, 50);
+      if(event.type==='rush')this.burst(event.x,event.y,'#e8a13a',20,190);
+      if(event.type==='redRush')this.burst(event.x,event.y,'#e03b3b',12,100);
       if (event.type === 'land') { this.landPose = .22; this.burst(event.x, event.y, '#8d8880', 8); }
-      if (event.type === 'stumble') { this.shake = .25; this.burst(event.x, event.y, '#e03b3b', 6); }
-      if (event.type === 'crash') this.shake = .32;
+      if(event.type==='jump'){
+        this.jumpPose=.18;this.burst(event.x,event.y,'#8d8880',5,45);
+      }
+      if(event.type==='flip-start'||event.type==='flip'){
+        this.flipPulse=.24;this.burst(event.x,event.y-15,'#e8a13a',4,35);
+      }
+      if (event.type === 'stumble') {
+        this.shake=event.heavy?.24:.14;this.impactPose=event.heavy?.55:.32;
+        this.burst(event.x,event.y-8,'#8d8880',event.heavy?14:8,110);
+        this.burst(event.x,event.y-25,'#e8a13a',4,65);
+        if(event.obstacle)this.hitObjects.push({...event.obstacle,life:.42,angle:event.obstacleAngle??event.angle});
+      }
+      if (event.type === 'crash') {
+        this.shake=.32;this.crashPose={...event,age:0};
+        this.burst(event.x,event.y-8,'#8d8880',22,170);
+        this.burst(event.x,event.y-12,'#e8a13a',5,90);
+      }
     }
     breakout(run) {
       this.intro = 1.7;
@@ -162,9 +192,17 @@
       }
       ctx.fillStyle='#e8a13a';ctx.beginPath();ctx.arc(0,0,4,0,Math.PI*2);ctx.fill();ctx.restore();
     }
-    update(run, dt) {
+    update(run, dt, alpha=1) {
       if (!this.ready) this.reset(run);
-      const p = run.player, altitude = Math.max(0, run.terrain(p.x) - p.y);
+      this.clock+=dt;
+      const old=run.previousPlayer,current=run.player;
+      this.visualPlayer={...current};
+      if(old&&!run.dead){
+        const t=clamp(alpha,0,1);
+        for(const key of ['x','y','speed','vx','vy'])this.visualPlayer[key]=old[key]+(current[key]-old[key])*t;
+        this.visualPlayer.angle=old.angle+Math.atan2(Math.sin(current.angle-old.angle),Math.cos(current.angle-old.angle))*t;
+      }
+      const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
       const zoom = clamp(.94 - Math.max(0, p.speed - 300) * .0004 - altitude * .00013, portrait?.68:.72, .94);
       const ease = 1 - Math.exp(-dt * 3.8);
@@ -175,6 +213,12 @@
       const focusX=this.intro>0 ? -88+88*(1-Math.pow(1-launchProgress,2)) : p.x;
       this.camera.x = focusX - this.width * (portrait?.24:.22) / this.camera.zoom;
       this.landPose = Math.max(0, this.landPose - dt);
+      this.impactPose=Math.max(0,this.impactPose-dt);
+      this.jumpPose=Math.max(0,this.jumpPose-dt);
+      this.flipPulse=Math.max(0,this.flipPulse-dt);
+      if(this.crashPose)this.crashPose.age+=dt;
+      for(const item of this.hitObjects)item.life-=dt;
+      this.hitObjects=this.hitObjects.filter(item=>item.life>0);
       this.shake = Math.max(0, this.shake - dt);
       const beforeIntro = this.intro;
       this.intro = Math.max(0, this.intro - dt);
@@ -308,11 +352,11 @@
       }
     }
     draw(run) {
-      const ctx = this.ctx, p = run.player, cam = this.camera;
+      const ctx = this.ctx, p = this.visualPlayer||run.player, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W;
       this.background(run);
       ctx.save();
-      if (this.shake) ctx.translate(Math.sin(run.time * 81) * this.shake * 5,Math.cos(run.time * 94) * this.shake * 5);
+      if (this.shake) ctx.translate(Math.sin(this.clock * 81) * this.shake * 5,Math.cos(this.clock * 94) * this.shake * 5);
       ctx.scale(cam.zoom,cam.zoom);ctx.translate(-cam.x,-cam.y);
       const left = cam.x - 120, right = cam.x + W/cam.zoom + 120, bottom = cam.y + H/cam.zoom + 1000;
       if (left < 50 && right > -220) this.vault(run);
@@ -333,6 +377,18 @@
           const width=portrait?17:12,spin=.82+.18*Math.cos(run.time*3+item.x*.03);
           ctx.drawImage(this.images.coin,item.x-width*spin/2,item.y-width/2,width*spin,width);
         }
+        else if(item.type==='rush'||item.type==='redRush'){
+          const red=item.type==='redRush',width=red?(portrait?30:25):(portrait?54:46),pulse=1+Math.sin(this.clock*3+item.x)*.06;
+          const spin=Math.max(.12,Math.abs(Math.cos(this.clock*(red?2.4:3.3)+item.x*.002)));
+          ctx.save();ctx.translate(item.x,item.y);ctx.globalAlpha=red?.23:.17;
+          const halo=ctx.createRadialGradient(0,0,width*.15,0,0,width*.85);
+          halo.addColorStop(0,red?'#e03b3b':'#e8a13a');halo.addColorStop(1,'rgba(0,0,0,0)');
+          ctx.fillStyle=halo;ctx.beginPath();ctx.arc(0,0,width*.85*pulse,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;
+          const half=this.images.rush.width/2,height=this.images.rush.height;
+          ctx.drawImage(this.images.rush,red?half:0,0,half,height,-width*spin/2,-width/2,width*spin,width);
+          ctx.strokeStyle=red?'rgba(224,59,59,.55)':'rgba(232,161,58,.45)';ctx.lineWidth=.8;
+          ctx.beginPath();ctx.arc(0,0,width*.55*pulse,-.8,.9);ctx.stroke();ctx.restore();
+        }
         else if(item.type==='boost') {
           ctx.save();ctx.translate(item.x,item.y);ctx.rotate(run.slope(item.x));this.prop(5,0,3,52);ctx.restore();
         } else {
@@ -341,13 +397,20 @@
           ctx.rotate(run.slope(item.x));
           if(art!==undefined)this.obstacle(art,0,1,item.width||38,item.height||28);
           else this.prop(3,0,1,34);
-          if(item.fatal){
+          if(item.hazard){
             // A small red crest remains readable on a phone at speed.
             ctx.fillStyle='#e03b3b';ctx.beginPath();
             ctx.moveTo(-4,-item.height-7);ctx.lineTo(4,-item.height-7);ctx.lineTo(0,-item.height-12);ctx.closePath();ctx.fill();
           }
           ctx.restore();
         }
+      }
+      for(const item of this.hitObjects){
+        const t=1-item.life/.42,art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
+        ctx.save();ctx.globalAlpha=(1-t)*.8;ctx.translate(item.x+t*18,item.y-t*9);
+        ctx.rotate(item.angle+t*.35);
+        if(art!==undefined)this.obstacle(art,0,1,item.width||38,item.height||28);
+        ctx.restore();
       }
       for(const q of this.particles){
         ctx.globalAlpha = clamp(q.life/q.max,0,.6);ctx.fillStyle=q.color;
@@ -364,7 +427,7 @@
       if(p.stagger>0)frame=7;
       else if(this.landPose>0)frame=6;
       else if(!p.grounded)frame=p.held && p.heldTime>.14 ? 2 : p.vy<0 ? 4 : 5;
-      else frame=p.rail?3:p.speed>430?1:0;
+      else frame=p.rail?3:p.speed>430?(Math.sin(run.time*7)>.82?0:1):(Math.sin(run.time*4)>.90?1:0);
       const launch = clamp((1.08-this.intro)/1.08,0,1);
       const progress = 1-Math.pow(1-launch,2);
       const actorX=this.intro>0 ? -88+88*progress : p.x;
@@ -372,8 +435,25 @@
       if(this.intro>1.08)frame=1;
       else if(this.intro>.4)frame=4;
       else if(this.intro>0)frame=6;
-      ctx.save();ctx.translate(actorX,actorY-1);ctx.rotate(this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
-      if(p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.55;
+      const crash=this.crashPose,age=crash?Math.min(.75,crash.age):0;
+      const crashTravel=crash?Math.min(24,crash.speed*.06)*Math.sin(age*Math.PI/.75):0;
+      if(p.rush>0){
+        // Warm shield and short motion trails, leaving the cat's face readable.
+        ctx.save();ctx.strokeStyle='rgba(232,161,58,.65)';ctx.lineWidth=1.3;
+        ctx.beginPath();ctx.ellipse(actorX,actorY-20,portrait?39:29,portrait?34:26,p.angle,0,Math.PI*2);ctx.stroke();
+        ctx.strokeStyle='rgba(232,161,58,.25)';
+        for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(actorX-28-i*9,actorY-12-i*8);ctx.lineTo(actorX-62-i*14,actorY-12-i*8);ctx.stroke();}ctx.restore();
+      }
+      ctx.save();ctx.translate(actorX+crashTravel,actorY-1+(crash?.reason==='MISSED THE GAP'?age*age*140:-(crash?Math.sin(age*Math.PI/.75)*16:0)));
+      ctx.rotate(crash?crash.angle-Math.min(age/.62,1)*Math.PI*.65:this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
+      if(crash)frame=7;
+      else if(this.impactPose>0){ctx.rotate(Math.sin(this.impactPose*32)*this.impactPose*.22);ctx.scale(1.06,.94);}
+      else if(this.jumpPose>0){ctx.scale(.97,1.05);frame=4;}
+      if(this.flipPulse>0){
+        ctx.save();ctx.globalAlpha=this.flipPulse/.24*.45;ctx.strokeStyle='#e8a13a';ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.arc(0,-18,portrait?32:23,-.4,Math.PI*1.1);ctx.stroke();ctx.restore();
+      }
+      if(p.rush<=0&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
       this.sprite(this.images.characters,characters[frame],0,0,portrait?60:40,false);
       ctx.restore();ctx.restore();ctx.globalAlpha=1;
       if(this.intro>0 && this.intro<=1.08 && this.intro>.96){

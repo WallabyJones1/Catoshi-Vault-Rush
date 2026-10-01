@@ -71,7 +71,10 @@
     show('game-screen'); resizeGame(); drawLoading();
     try {
       if (!ctx || typeof VaultRush === 'undefined' || typeof VaultRushRenderer === 'undefined') throw new Error('Game unavailable');
-      const [images,onlineTicket] = await Promise.all([artworkReady(),window.RushOnline.prepare(isPractice)]);
+      // Failed artwork must not spend one of a holder's daily attempts.
+      const images=await artworkReady();
+      if(operation!==startId)return;
+      const onlineTicket=await window.RushOnline.prepare(isPractice);
       if (operation !== startId) return;
       setRunTicket(onlineTicket);
       if(onlineTicket?.wallet)wallet=onlineTicket.wallet;
@@ -94,6 +97,10 @@
   function updateHud() {
     if (!run) return;
     ui.coins.textContent = run.coins;
+    $('run-red').textContent=run.redTokens+' / 5';
+    $('rush-burst').hidden=run.player.rush<=0;
+    $('rush-time').textContent=run.player.rush.toFixed(1)+'s';
+    $('rush-meter').value=run.player.rush;
     ui.distance.textContent = Math.floor(run.player.x / 10) + 'm';
     ui.score.textContent = String(Math.floor(run.score)).padStart(6,'0');
     ui.speed.textContent = Math.round(run.player.speed * .1);
@@ -112,7 +119,15 @@
         }
         ui.trick.classList.add('visible'); trickTime = 1.8;
       }
-      if (event.type === 'crash') { phase = 'crashed'; resultDelay = .65; releaseInput(); }
+      if(event.type==='rush'||event.type==='redRush'){
+        ui.trick.textContent=event.type==='rush'?'RUSH · 7s SPEED + SHIELD':'RED RUSH · '+event.total+' / 5 THIS RUN';
+        ui.trick.classList.add('visible');trickTime=1.8;
+      }
+      if(event.type==='stumble'){
+        ui.trick.textContent='BUMP · KEEP MOVING';
+        ui.trick.classList.add('visible');trickTime=.8;
+      }
+      if (event.type === 'crash') { phase = 'crashed'; resultDelay = .85; releaseInput(); }
     }
   }
   function finish() {
@@ -121,6 +136,9 @@
     ui['final-distance'].textContent = Math.floor(run.player.x / 10) + 'm';
     ui['final-score'].textContent = Math.floor(run.score).toLocaleString();
     ui['final-coins'].textContent = run.coins;
+    $('personal-best').textContent='';
+    $('result-quest').textContent=practice?'Practice collectibles do not count toward the daily holder quest.':'Checking daily quest…';
+    $('run-pickups').textContent=run.redTokens+' RED RUSH · '+run.rushPickups+' SPEED BURST'+(run.rushPickups===1?'':'S');
     ui['result-kicker'].textContent = practice ? 'PRACTICE RUN' : 'DAILY HOLDER RUN';
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
     ui['result-copy'].textContent = practice
@@ -159,7 +177,7 @@
       resultDelay -= dt;
       if (resultDelay <= 0) { finish(); return; }
     }
-    if (phase !== 'paused') renderer.update(run,dt);
+    if (phase !== 'paused') renderer.update(run,dt,phase==='running'?accumulator/FIXED_STEP:1);
     renderer.draw(run);
     if (['running','countdown','paused','crashed'].includes(phase)) raf = requestAnimationFrame(loop);
   }
@@ -240,6 +258,11 @@
       if (request !== walletRequest || phase !== 'menu') return;
       if (!balance.eligible) {
         status(Number(balance.tokens).toLocaleString() + ' CATOSHI found — 50,000 required. Practice is always available.','error');
+        return;
+      }
+      wallet=address;window.RushOnline.setWallet(address);
+      if(balance.quota?.remaining===0){
+        status('All 10 holder runs used today. Your best run stays on the board. Resets at 00:00 UTC; practice is unlimited.','error');
         return;
       }
       wallet=address;

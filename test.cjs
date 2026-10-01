@@ -110,8 +110,13 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   const board=(await request('/api/leaderboard?mode=practice')).value;assert.equal(board.entries[0].name,'Cat Runner');assert(!Object.hasOwn(board.entries[0],'session'));
   assert.match((await request('/score/'+ticket.id)).value,/og:title/);
   for(const file of ['server.cjs','.env','security.cjs','test.cjs','data/catoshi.sqlite'])assert.equal((await request('/'+file)).res.status,404);
-  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png'])assert.equal((await request('/'+file)).res.status,200);
+  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','home.js','catoshi-home-loop-v1.png','rush-pickups-v2.png'])assert.equal((await request('/'+file)).res.status,200);
   const range=await fetch(base+'/music.mp3',{headers:{Range:'bytes=0-31'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-length'),'32');assert.equal((await range.arrayBuffer()).byteLength,32);
+  for(const kind of ['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red']){
+    const response=await fetch(base+'/sfx-'+kind+'-v1.wav',{headers:{Range:'bytes=0-43'}});
+    assert.equal(response.status,206);assert.equal(response.headers.get('content-type'),'audio/wav');
+    assert.equal(response.headers.get('accept-ranges'),'bytes');assert.equal((await response.arrayBuffer()).byteLength,44);
+  }
   const badRange=await fetch(base+'/music.mp3',{headers:{Range:'bytes=999999999999-'}});assert.equal(badRange.status,416);await badRange.arrayBuffer();
   assert.equal((await request('/api/auth/challenge',{wallet})).res.status,404);
   assert.equal((await request('/api/runs/start',{name:'Low balance',mode:'holder',wallet:security.MINT,engine:security.ENGINE_VERSION})).res.status,403);
@@ -185,7 +190,7 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
 });
 test('audio preference and lack of AudioContext cannot block play',async()=>{
   const button=new Element('sound-toggle'),document=new Element('document'),window=new Element('window');document.getElementById=()=>button;
-  const storage=new Map();vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{document,window,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},Math,Audio:class{}});
+  const storage=new Map();vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{document,window,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},Math,Audio:class{play(){return Promise.resolve();}pause(){}}});
   assert.equal(button.textContent,'SOUND ON');window.RushSound.unlock();window.RushSound.setPlaying(true);window.RushSound.effect({type:'coin'});
   await button.dispatch('click');assert.equal(button.textContent,'SOUND OFF');assert.equal(storage.get('rush-muted'),'1');
   await button.dispatch('click');assert.equal(button.textContent,'SOUND ON');window.RushSound.burst();
@@ -274,28 +279,32 @@ test('current request host fixes stale Railway origins while cross-site and forw
   assert.equal(configFromEnv({NODE_ENV:'production',RAILWAY_PUBLIC_DOMAIN:'game.up.railway.app',DATABASE_PATH:'/data/test.sqlite'}).origin,'https://game.up.railway.app');
 });
 
-test('unattended runs fail; active taps can clear early hazards within phone look-ahead',()=>{
-  let clearable=0;const routes=new Set(),hazards=new Set();
+test('unattended runs lose momentum and usually fail; timed taps avoid early obstacles',()=>{
+  let clearable=0,failed=0,bumped=0;const routes=new Set(),hazards=new Set();
   for(let seed=1;seed<=300;seed++){
-    const idle=new Run(seed);advance(idle,120*20);
-    assert(idle.dead,'no input must not complete a round');assert(idle.time>4,'the introduction stays safe');
+    const idle=new Run(seed);let idleHits=0;
+    for(let tick=0;tick<120*90&&!idle.dead;tick++){idle.step(1/120);idleHits+=idle.drainEvents().filter(event=>event.type==='stumble').length;}
+    failed+=idle.dead;bumped+=idleHits>0;assert(idle.time>4,'the introduction stays safe');
     const route=new Run(seed);route.generate(40000);routes.add(route.biomes.join(','));
-    for(const item of route.items)if(item.fatal)hazards.add(item.type);
+    for(const item of route.items)if(item.hazard)hazards.add(item.type);
     let cleared=false;
     for(const distance of [100,150,200,250,300,350,400,450,500,550,600]){
-      const run=new Run(seed),gate=run.items.find(item=>item.fatal);let tapped=false;
+      const run=new Run(seed),gate=run.items.find(item=>item.hazard);let tapped=false,hit=false;
       for(let tick=0;tick<120*20&&!run.dead;tick++){
         if(!tapped&&gate.x-run.player.x<distance){run.press();run.release();tapped=true;}
         run.step(1/120);
-        if(run.player.x>gate.x+95){cleared=!run.dead;break;}
+        for(const event of run.drainEvents())if(event.type==='stumble'&&event.kind===gate.type)hit=true;
+        if(run.player.x>gate.x+95){cleared=!run.dead&&!hit;break;}
       }
       if(cleared)break;
     }
     clearable+=cleared;
   }
+  assert(failed>=225,'at least 75% of sampled idle routes fail within 90 seconds while allowing collision recovery');
+  assert(bumped>=294,'idle play should reliably cost momentum');
   assert(clearable>=294,'timed taps should clear early hazards in at least 98% of sampled routes; crest landings also require control');
   assert.equal(routes.size,6,'all orders of the three extra biomes occur');
-  assert.deepEqual([...hazards].sort(),['barrier','cart','spikes','stack']);
+  assert.deepEqual([...hazards].sort(),['barrier','cart','log','rock','spikes','stack']);
 });
 
 test('ramps join ground with continuous height, slope and curvature and no step onto the kicker',()=>{
@@ -313,7 +322,7 @@ test('ramps join ground with continuous height, slope and curvature and no step 
     }
   }
   assert(rampCount>300);
-  const run=new Run(42);run.generate(12000);const ramp=run.ramps[0];assert(ramp);
+  const run=new Run(42);run.generate(40000);const ramp=run.ramps[0];assert(ramp);
   Object.assign(run.player,{x:ramp.x-15,y:run.terrain(ramp.x-15),speed:420,boost:0,grounded:true});
   run.items=[];let entered=false,launched=false;
   for(let tick=0;tick<240&&!run.dead;tick++){
@@ -325,17 +334,66 @@ test('ramps join ground with continuous height, slope and curvature and no step 
   assert(entered&&launched,'the joined ramp still provides a takeoff');
 });
 
-test('red hazards defeat invulnerability and an actual timed jump clears their collision shape',()=>{
+test('large obstacles slow the rider, consume collisions once and allow clean jumps',()=>{
   const setup=()=>{
     const run=new Run(5);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;run.ramps=[];run.gaps=[];run.rails=[];
     Object.assign(run.player,{x:0,y:200,speed:400,vx:400,boost:0,angle:0,grounded:true});
-    run.items=[{type:'spikes',x:180,y:200,width:70,height:31,fatal:true,hit:false}];return run;
+    run.nextFeature=run.nextScenery=Infinity;
+    run.items=[{type:'spikes',x:180,y:200,width:70,height:31,hazard:true,heavy:true,hit:false}];return run;
   };
-  const idle=setup();idle.player.invulnerable=3;advance(idle,120);assert.equal(idle.reason,'HIT THE SPIKES');
+  for(const kind of ['barrier','cart','stack','spikes']){
+    const idle=setup();idle.items[0].type=kind;idle.combo=5;let impact;
+    for(let tick=0;tick<120&&!impact;tick++){idle.step(1/120);impact=idle.drainEvents().find(event=>event.type==='stumble');}
+    assert(impact&&impact.heavy);assert(!idle.dead);assert.equal(idle.combo,1);
+    assert(idle.player.speed>=90&&idle.player.speed<=150);assert(impact.loss>240);
+    advance(idle,90);assert(!idle.dead,'an obstacle impact does not end the run');
+    assert(!idle.drainEvents().some(event=>event.type==='stumble'),'do not hit the same object twice');
+  }
+  const protectedRun=setup();protectedRun.player.invulnerable=3;advance(protectedRun,80);
+  assert(!protectedRun.dead);assert(protectedRun.player.speed>350);assert.equal(protectedRun.items.length,0,'recovery consumes the nearby object without repeated penalties');
   const jumped=setup();jumped.press();jumped.release();advance(jumped,90);assert(!jumped.dead);assert(jumped.player.x>250);
+  assert(!jumped.drainEvents().some(event=>event.type==='stumble'));
 });
 
-function audioHarness({broken=false}={}){
+test('midair flip sounds start before landing, each full turn emits once, and fatal landings remain fatal',()=>{
+  const run=new Run(5);run.items=[];run.nextFeature=run.nextScenery=Infinity;run.gaps=[];run.rails=[];run.ramps=[];
+  run.terrain=()=>5000;run.derivative=()=>0;run.slope=()=>0;
+  Object.assign(run.player,{grounded:false,x:0,y:0,vx:400,vy:-20,speed:400,coyote:0});
+  run.press();run.drainEvents();const events=[];
+  for(let tick=0;tick<190;tick++){run.step(1/120);events.push(...run.drainEvents());}
+  assert.equal(events.filter(event=>event.type==='flip-start').length,1);
+  assert.equal(events.filter(event=>event.type==='flip').length,1);
+  assert(!events.some(event=>event.type==='land'||event.type==='trick'),'airborne sounds do not award landing points');
+  run.release();run.land(5000,0);assert(run.dead);assert.equal(run.reason,'HARD LANDING');
+  const crash=run.drainEvents().find(event=>event.type==='crash');assert(Number.isFinite(crash.x)&&Number.isFinite(crash.y));
+});
+
+function recoveryRun(){
+ const run=new Run(5);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;
+ run.ramps=[];run.gaps=[];run.rails=[];run.items=[];run.nextFeature=run.nextScenery=Infinity;
+ Object.assign(run.player,{x:100,y:188,speed:500,vx:500,vy:1400,angle:2.2,grounded:false,airborne:1.4,boost:0,coyote:0});return run;
+}
+test('landing on a tall obstacle cannot bypass the nonfatal collision response or feed a nearby hound',()=>{
+ for(const kind of ['barrier','cart','stack','spikes','rock','log','crate']){
+  const run=recoveryRun();run.items=[{type:kind,x:104,y:200,width:74,height:70,heavy:true,hazard:true}];
+  run.dog={active:true,distance:24.1,warning:true};run.step(1/120);
+  assert(!run.dead,kind+' collision and landing must survive');advance(run,1);assert(run.player.grounded);
+  assert(run.player.recovery>1.9);assert(run.dog.distance>=180);assert(!run.dog.warning);
+  assert.equal(run.drainEvents().filter(event=>event.type==='stumble').length,1);
+  advance(run,240);assert(!run.dead,'recovery keeps the run alive');assert(run.player.recovery===0);
+ }
+ const unprotected=recoveryRun();advance(unprotected,2);assert(unprotected.dead);assert.equal(unprotected.reason,'HARD LANDING');
+});
+test('a gap entered during bump recovery stays recoverable even when the timer ends in midflight',()=>{
+ const run=recoveryRun();Object.assign(run.player,{grounded:true,x:0,y:200,speed:400,vx:400,vy:0,angle:0,airborne:0});
+ run.gaps=[{x:10,end:500}];run.stumble({type:'cart',x:0,y:200,hazard:true,heavy:true});
+ let entered=false,expiredInGap=false;
+ for(let n=0;n<120*9&&!run.dead;n++){run.step(1/120);entered||=Boolean(run.player.recoveryGap);expiredInGap||=Boolean(run.player.recoveryGap)&&run.player.recovery===0;run.drainEvents();}
+ assert(entered&&expiredInGap);assert(!run.dead);assert(run.player.x>500);assert.equal(run.player.recoveryGap,null);
+ const miss=recoveryRun();Object.assign(miss.player,{x:0,y:200,vx:100,vy:0,speed:100});miss.gaps=[{x:-10,end:500}];advance(miss,300);assert(miss.dead,'unprotected missed gaps still fail');
+});
+
+function audioHarness({broken=false,mobile=false}={}){
   const button=new Element('sound-toggle'),document=new Element('document'),window=new Element('window');
   document.getElementById=()=>button;document.hidden=false;
   const parameter=()=>({value:0,setValueAtTime(){},exponentialRampToValueAtTime(){}});
@@ -354,15 +412,15 @@ function audioHarness({broken=false}={}){
     wake(){this.state='running';for(const callback of this.listeners)callback();this.resolveResume?.();}
     close(){this.closed=true;this.state='closed';return Promise.resolve();}
   }
-  let music,finishMusic;class Track{
-    constructor(){music=this;this.plays=0;this.pauses=0;}
-    play(){this.plays++;if(this.plays===1)return new Promise(resolve=>{finishMusic=resolve;});return Promise.resolve();}
+  let music,finishMusic;const tracks=[];class Track{
+    constructor(src){this.src=src;this.plays=0;this.pauses=0;this.history=[];tracks.push(this);if(src==='music.mp3')music=this;}
+    play(){this.plays++;this.history.push(this.src);if(this.plays===1)return new Promise(resolve=>{this.finishPlay=resolve;if(this.src==='music.mp3')finishMusic=resolve;});return Promise.resolve();}
     pause(){this.pauses++;}
   }
   window.AudioContext=Context;window.RushAudioConfig={musicSrc:'music.mp3',musicVolume:.16,effectsVolume:.72};
-  const navigator={audioSession:{type:'ambient'}};
-  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{window,document,navigator,Audio:Track,localStorage:{getItem(){},setItem(){}},Math,Set,Promise});
-  return {button,document,window,contexts,navigator,get music(){return music;},finishMusic:()=>finishMusic?.()};
+  const navigator={audioSession:{type:'ambient'},maxTouchPoints:mobile?5:0};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'sound.js'),'utf8'),{window,document,navigator,Audio:Track,localStorage:{getItem(){},setItem(){}},Math,Set,Promise,setTimeout,clearTimeout,Date});
+  return {button,document,window,contexts,navigator,tracks,get music(){return music;},finishMusic:()=>finishMusic?.()};
 }
 
 test('audible blast and every coin unlock, queue, resume and stop correctly on mobile audio states',async()=>{
@@ -400,6 +458,24 @@ test('a partially supported AudioContext cannot throw into the game loop',()=>{
   const h=audioHarness({broken:true}),sound=h.window.RushSound;
   assert.doesNotThrow(()=>{sound.unlock();sound.setPlaying(true);sound.burst();sound.effect({type:'coin'});sound.setPlaying(false);});
   assert(h.contexts.every(context=>context.closed));
+});
+
+test('jump, flip, material bumps and final crashes play distinct audible samples',async()=>{
+  const h=audioHarness(),sound=h.window.RushSound;sound.unlock();const ctx=h.contexts[0];ctx.wake();await Promise.resolve();sound.setPlaying(true);
+  const [,,jump,flip,metal,wood,stone,crash]=ctx.buffers;
+  for(const buffer of [jump,flip,metal,wood,stone,crash]){
+    const values=buffer.getChannelData(0);let energy=0;
+    for(const value of values){assert(Number.isFinite(value));assert(Math.abs(value)<=.901);energy+=value*value;}
+    assert(Math.sqrt(energy/values.length)>.03);assert(Math.abs(values.at(-1))<.005);
+  }
+  for(const event of [{type:'jump'},{type:'flip-start'},{type:'flip',turns:1},
+    {type:'stumble',material:'metal',heavy:true},{type:'stumble',material:'wood'},
+    {type:'stumble',material:'stone'},{type:'crash'}])sound.effect(event);
+  assert.equal(ctx.sources.filter(source=>source.buffer===jump).length,1);
+  assert.equal(ctx.sources.filter(source=>source.buffer===flip).length,2);
+  for(const buffer of [metal,wood,stone,crash])assert.equal(ctx.sources.filter(source=>source.buffer===buffer).length,1);
+  const before=ctx.sources.length;sound.effect({type:'rush'});sound.effect({type:'redRush'});
+  assert.equal(ctx.sources.length-before,8,'distinct rising power-up and red collection sounds are scheduled');
 });
 
 test('balance response validation retries healthy RPCs and program queries handle both Solana token programs',async()=>{
@@ -484,4 +560,46 @@ test('top ten unique wallets share both pools exactly; finalized transfers settl
     assert.equal(fewer.payments.find(p=>p.symbol==='CATOSHI').raw,'100000000000','sole winner receives full configured pool');
     await assert.rejects(rewards.recordTop10Payment(db,2,'CATOSHI',signature,config,{transaction:async()=>tx}),/already/);
   }finally{db.close();}
+});
+
+
+test('mobile WAV voices unlock on the first tap, play the blast and every coin, and stop on pause',async()=>{
+ const h=audioHarness({mobile:true}),sound=h.window.RushSound;
+ sound.unlock();const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav');assert.equal(voices.length,8);
+ assert(voices.every(track=>track.plays===1&&track.pauses===0),'do not abort the gesture-authorized silent play');
+ sound.setPlaying(true);sound.burst();sound.effect({type:'jump'});sound.effect({type:'flip-start'});sound.effect({type:'stumble',material:'metal'});
+ for(const voice of voices)voice.finishPlay();await Promise.resolve();await Promise.resolve();
+ const history=()=>voices.flatMap(voice=>voice.history);
+ for(const kind of ['burst','jump','flip','metal'])assert(history().includes('sfx-'+kind+'-v1.wav'));
+ for(let i=0;i<3;i++)sound.effect({type:'coin'});
+ await new Promise(resolve=>setTimeout(resolve,150));assert.equal(history().filter(src=>src==='sfx-coin-v1.wav').length,3);
+ sound.effect({type:'coin'});sound.setPlaying(false);await new Promise(resolve=>setTimeout(resolve,60));
+ assert.equal(history().filter(src=>src==='sfx-coin-v1.wav').length,3,'pause cancels queued pickup sounds');
+ assert(voices.every(voice=>voice.pauses>0));sound.setPlaying(true);sound.effect({type:'rush'});sound.effect({type:'redRush'});sound.effect({type:'crash'});
+ for(const kind of ['rush','red','crash'])assert(history().includes('sfx-'+kind+'-v1.wav'));
+ await h.button.dispatch('click');const before=history().length;sound.burst();assert.equal(history().length,before,'muting also stops mobile media effects');
+});
+test('a pending resume promise cannot prevent a later trusted tap from retrying audio',async()=>{
+ const h=audioHarness(),sound=h.window.RushSound;sound.unlock();const ctx=h.contexts[0];assert.equal(ctx.resumes,1);
+ await h.window.dispatch('touchend');assert.equal(ctx.resumes,2,'retry even if the earlier resume never settled');
+ sound.setPlaying(true);sound.burst();ctx.wake();await Promise.resolve();assert(ctx.sources.some(source=>source.buffer===ctx.buffers[1]));
+});
+test('all bundled effects are valid, audible PCM WAVs with faded tails; priming media is silent',()=>{
+ for(const kind of ['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red']){
+  const bytes=fs.readFileSync(path.join(__dirname,'sfx-'+kind+'-v1.wav'));assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WAVE');
+  assert.equal(bytes.readUInt32LE(24),44100);assert.equal(bytes.readUInt16LE(34),16);assert.equal(bytes.readUInt32LE(40),bytes.length-44);
+  let sum=0,peak=0;for(let i=44;i<bytes.length;i+=2){const v=bytes.readInt16LE(i)/32768;sum+=v*v;peak=Math.max(peak,Math.abs(v));}
+  if(kind==='silence')assert.equal(peak,0);else{assert(Math.sqrt(sum/((bytes.length-44)/2))>.02,kind+' is audible');assert(peak<.91);assert(Math.abs(bytes.readInt16LE(bytes.length-2))<164);}
+ }
+});
+
+
+test('a stalled mobile priming request can be retried and its late resolution cannot stop a newer effect',async()=>{
+ const h=audioHarness({mobile:true}),sound=h.window.RushSound;sound.unlock();
+ const voices=h.tracks.filter(track=>track.src==='sfx-silence-v1.wav');
+ sound.setPlaying(true);sound.burst();await h.window.dispatch('touchend');await Promise.resolve();
+ assert(voices.every(voice=>voice.plays>=2),'retry media while an earlier play promise is pending');
+ assert(voices.some(voice=>voice.history.includes('sfx-burst-v1.wav')));
+ const counts=voices.map(voice=>voice.pauses);for(const voice of voices)voice.finishPlay();await Promise.resolve();
+ assert.deepEqual(voices.map(voice=>voice.pauses),counts,'late priming results do not pause a playing effect');sound.setPlaying(false);
 });

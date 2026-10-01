@@ -1,3 +1,3 @@
 // Supplied soundtrack: kaapz – Cat Arpeggio. Set musicSrc to '' to disable music.
-// Effects include the vault explosion and one chime per collected coin.
+// Web Audio effects with gesture-unlocked WAV playback on mobile: vault, every coin, jumps, flips, bumps, crashes and RUSH pickups.
 window.RushAudioConfig = { musicSrc: 'music.mp3', musicVolume: 0.16, effectsVolume: 0.72 };
