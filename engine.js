@@ -311,12 +311,20 @@
       const impact = p.vy * Math.cos(angle) - p.vx * Math.sin(angle);
       const rotation = Math.abs(angleDelta(p.angle - angle));
       const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
-      if (p.rush<=0 && p.recovery<=0 && !p.recoveryGap && p.airborne > 0.25 && ((p.held && rotation > 1.02) || impact > impactLimit)) {
-        this.crash(p.held && rotation > 1.02 ? 'CRASH LANDING' : 'HARD LANDING');
+      if (p.rush<=0 && p.recovery<=0 && !p.recoveryGap && p.airborne > 0.25 && (p.held && rotation > 1.02)) {
+        this.crash('CRASH LANDING');
         return;
       }
       p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?850:115, p.rush>0?1080:780);
-      if (p.rush<=0&&impact > 650) p.speed *= 0.8;
+      const rough=p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
+      if(rough){
+        // Auto-aligned high falls are recoverable. Fall speed alone must never
+        // kill a rider whose board is upright; keep the impact readable.
+        p.speed=Math.max(150,p.speed*.72);p.stagger=Math.max(p.stagger,.38);
+        p.recovery=Math.max(p.recovery,1.2);this.combo=1;this.slowTime=0;
+        if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
+        this.event('stumble',{x:p.x,y,angle,heavy:false,material:'stone',kind:'landing'});
+      }else if(p.rush<=0&&impact>650)p.speed*=.8;
       p.y = y;
       p.angle = angle;
       p.grounded = true;
@@ -329,7 +337,7 @@
       }
       if (p.airborne > 0.35) {
         const turns = Math.floor(p.spin / TAU + 0.025);
-        if (turns > 0) {
+        if (turns > 0 && !rough) {
           this.combo = Math.min(8, this.combo + turns);
           const points = 500 * turns * this.combo;
           this.score += points;
@@ -537,5 +545,5 @@
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-8' };
+  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-9' };
 });

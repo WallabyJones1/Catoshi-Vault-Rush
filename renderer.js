@@ -250,6 +250,17 @@
       const rect=obstacles[index];
       this.ctx.drawImage(this.images.obstacles,...rect,x-width/2,y-height,width,height);
     }
+    groundMark(width,height,good=false) {
+      const ctx=this.ctx,color=good?'#3ddc54':'#e03b3b',half=Math.min(width*.22,12);
+      // Small painted face marks, not a glowing outline that overpowers art.
+      ctx.save();ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=2.4;ctx.lineCap='round';
+      const y=-Math.max(5,height*.38);
+      ctx.globalAlpha=.82;
+      ctx.beginPath();ctx.moveTo(-half,y+2);ctx.lineTo(-half*.45,y-2);
+      ctx.lineTo(half*.1,y+2);ctx.lineTo(half*.65,y-2);ctx.lineTo(half,y+1);ctx.stroke();
+      if(good){ctx.beginPath();ctx.moveTo(4,y-6);ctx.lineTo(9,y-3);ctx.lineTo(4,y);ctx.stroke();}
+      ctx.restore();
+    }
     groundPlacement(run,x,width,angle=0,feet=[[-.45,.45]]) {
       const cosine=Math.cos(angle),sine=Math.sin(angle),surface=run.terrain(x);
       let base=surface;
@@ -358,7 +369,7 @@
         // recovery. Highlight only the takeoff rather than drawing a wedge.
         ctx.beginPath();ctx.moveTo(r.end-90,run.terrain(r.end-90));
         for(let x=r.end-84;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
-        ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(232,161,58,.5)';ctx.lineWidth=2;ctx.stroke();
+        ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(61,220,84,.65)';ctx.lineWidth=2;ctx.stroke();
       }
     }
     rails(run, left, right) {
@@ -426,7 +437,7 @@
         else if(item.type==='boost') {
           this.groundShadow(run,item.x,52);
           const mount=this.groundPlacement(run,item.x,52,run.slope(item.x));
-          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);ctx.restore();
+          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);this.groundMark(52,16,true);ctx.restore();
         } else {
           const art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
           this.groundShadow(run,item.x,item.width||38);
@@ -434,10 +445,12 @@
           ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);
           if(art!==undefined)this.obstacle(art,0,0,item.width||38,item.height||28);
           else this.prop(3,0,0,34);
-          if(item.hazard){
+          this.groundMark(item.width||38,item.height||28);
+          {
             // A small red crest remains readable on a phone at speed.
             ctx.fillStyle='#e03b3b';ctx.beginPath();
-            ctx.moveTo(-4,-item.height-7);ctx.lineTo(4,-item.height-7);ctx.lineTo(0,-item.height-12);ctx.closePath();ctx.fill();
+            const height=item.height||28;
+            ctx.moveTo(-3,-height-4);ctx.lineTo(3,-height-4);ctx.lineTo(0,-height-8);ctx.closePath();ctx.fill();
           }
           ctx.restore();
         }
@@ -446,7 +459,7 @@
         const t=1-item.life/.42,art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
         ctx.save();ctx.globalAlpha=(1-t)*.8;ctx.translate(item.x+t*18,item.y-t*9);
         ctx.rotate(item.angle+t*.35);
-        if(art!==undefined)this.obstacle(art,0,1,item.width||38,item.height||28);
+        if(art!==undefined){this.obstacle(art,0,1,item.width||38,item.height||28);this.groundMark(item.width||38,item.height||28);}
         ctx.restore();
       }
       for(const q of this.particles){

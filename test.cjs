@@ -354,7 +354,7 @@ test('large obstacles slow the rider, consume collisions once and allow clean ju
   assert(!jumped.drainEvents().some(event=>event.type==='stumble'));
 });
 
-test('midair flip sounds start before landing, each full turn emits once, and fatal landings remain fatal',()=>{
+test('midair flip sounds start before landing, each full turn emits once, and held bad flips remain fatal',()=>{
   const run=new Run(5);run.items=[];run.nextFeature=run.nextScenery=Infinity;run.gaps=[];run.rails=[];run.ramps=[];
   run.terrain=()=>5000;run.derivative=()=>0;run.slope=()=>0;
   Object.assign(run.player,{grounded:false,x:0,y:0,vx:400,vy:-20,speed:400,coyote:0});
@@ -363,8 +363,24 @@ test('midair flip sounds start before landing, each full turn emits once, and fa
   assert.equal(events.filter(event=>event.type==='flip-start').length,1);
   assert.equal(events.filter(event=>event.type==='flip').length,1);
   assert(!events.some(event=>event.type==='land'||event.type==='trick'),'airborne sounds do not award landing points');
-  run.release();run.land(5000,0);assert(run.dead);assert.equal(run.reason,'HARD LANDING');
+  Object.assign(run.player,{held:true,angle:Math.PI});run.land(5000,0);assert(run.dead);assert.equal(run.reason,'CRASH LANDING');
   const crash=run.drainEvents().find(event=>event.type==='crash');assert(Number.isFinite(crash.x)&&Number.isFinite(crash.y));
+});
+
+
+test('high auto-aligned falls survive touchdown, show one impact and do not grant rough flip bonuses',()=>{
+ for(const slope of [-.5,0,.5])for(const height of [600,1800,3500]){
+  const run=new Run(11);run.nextFeature=run.nextScenery=Infinity;run.items=[];run.gaps=[];run.rails=[];run.ramps=[];
+  run.terrain=x=>height+x*slope;run.derivative=()=>slope;run.slope=()=>Math.atan(slope);
+  Object.assign(run.player,{x:0,y:0,vx:420,vy:0,speed:420,angle:Math.atan(slope),grounded:false,held:false,coyote:0});
+  const events=[];for(let i=0;i<1800&&!run.player.grounded&&!run.dead;i++){run.step(1/120);events.push(...run.drainEvents());}
+  assert(!run.dead,'upright '+height+' fall onto slope '+slope);assert(run.player.grounded);
+  assert(!events.some(e=>e.type==='crash'));
+  const impacts=events.filter(e=>e.type==='stumble'&&e.kind==='landing');assert(impacts.length<=1,'no repeat impact');
+  if(height>=1800){assert.equal(impacts.length,1);assert(run.player.recovery>1);assert(run.player.speed>=150);}
+ }
+ const rough=new Run(1);Object.assign(rough.player,{airborne:2,spin:TAU,angle:0,vx:400,vy:1500,held:false});
+ rough.land(200,0);assert(!rough.dead);assert(!rough.drainEvents().some(e=>/BACKFLIP/.test(e.text||'')),'rough landing does not bank a flip reward');
 });
 
 function recoveryRun(){
@@ -381,7 +397,7 @@ test('landing on a tall obstacle cannot bypass the nonfatal collision response o
   assert.equal(run.drainEvents().filter(event=>event.type==='stumble').length,1);
   advance(run,240);assert(!run.dead,'recovery keeps the run alive');assert(run.player.recovery===0);
  }
- const unprotected=recoveryRun();advance(unprotected,2);assert(unprotected.dead);assert.equal(unprotected.reason,'HARD LANDING');
+ const unprotected=recoveryRun();advance(unprotected,2);assert(!unprotected.dead,'an unheld high landing also recovers');assert(unprotected.player.grounded);assert(unprotected.player.recovery>1);
 });
 test('a gap entered during bump recovery stays recoverable even when the timer ends in midflight',()=>{
  const run=recoveryRun();Object.assign(run.player,{grounded:true,x:0,y:200,speed:400,vx:400,vy:0,angle:0,airborne:0});
@@ -396,7 +412,7 @@ function audioHarness({broken=false,mobile=false,disabled=false}={}){
   const document=new Element('document'),window=new Element('window');let time=0;
   document.getElementById=()=>{throw Error('audio must not need UI');};document.hidden=false;
   const parameter=()=>({value:0,setValueAtTime(){},exponentialRampToValueAtTime(){}});
-  const node=()=>({connect(){},disconnect(){this.disconnected=true;},gain:parameter()});
+  const node=()=>({connect(target){this.output=target;},disconnect(){this.disconnected=true;},gain:parameter()});
   const contexts=[];
   class Context{
     constructor(options){this.options=options;this.state='suspended';this.sampleRate=48000;this.currentTime=10;this.destination=node();this.buffers=[];this.sources=[];this.listeners=[];this.resumes=0;contexts.push(this);}
@@ -442,6 +458,8 @@ test('audible blast and every coin start immediately, resume and stop with play 
   assert.equal(ctx.sources.filter(source=>source.buffer===blast).length,1);
   const chimes=ctx.sources.filter(source=>source.buffer===coin);assert.equal(chimes.length,3,'rapid pickups are not dropped');
   assert(chimes.every(source=>source.at===ctx.currentTime),'no per-coin delay or cumulative scheduling backlog');
+  assert(chimes.every(source=>source.output.gain.value===.8),'coin mix is 20% lower');
+  assert.equal(ctx.sources.find(source=>source.buffer===blast).output.gain.value,1,'other sounds keep their level');
   h.finishMusic();await Promise.resolve();assert.equal(h.music.pauses,0);
   ctx.state='interrupted';sound.effect({type:'coin'});assert.equal(ctx.resumes,2);ctx.wake();await Promise.resolve();
   assert.equal(ctx.sources.filter(source=>source.buffer===coin).length,4,'interrupted Safari context resumes');
@@ -586,6 +604,8 @@ test('fallback clips preload once and replay immediately without changing source
  for(const kind of ['burst','jump','flip','crash','rush','redRush'])sound.effect({type:kind});
  assert.equal(voices.filter(voice=>voice.src==='sfx-coin-v1.wav').reduce((sum,voice)=>sum+voice.history.filter(src=>src==='sfx-coin-v1.wav').length,0),8,'fallback coin calls happen synchronously');
  assert.deepEqual(voices.map(voice=>({src:voice.src,loads:voice.loads})),initial,'events do not reload or switch media files');
+ assert(voices.filter(v=>v.src==='sfx-coin-v1.wav').every(v=>v.volume===.72*.8),'fallback coins use the same quieter mix');
+ assert.equal(voices.find(v=>v.src==='sfx-burst-v1.wav').volume,.72,'fallback blast stays unchanged');
  sound.setPlaying(false);assert(voices.every(voice=>voice.paused));
 });
 test('audio can still be disabled through config without any visible toggle',()=>{

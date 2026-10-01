@@ -58,7 +58,7 @@
     const voice=bank.find(voice=>voice.audio.paused||voice.audio.ended)||bank.reduce((a,b)=>a.serial<b.serial?a:b);
     const audio=voice.audio,serial=++voice.serial;
     try{
-      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72);
+      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?.8:1);
       audio.playbackRate=event.type==='coin'?1+(coinSequence++%5)*.025:1;
       Promise.resolve(audio.play()).then(()=>{
         if(voice.serial===serial&&(!playing||document.hidden))audio.pause();
@@ -187,9 +187,10 @@
       syncMusic();
     }catch{musicPriming=false;}
   }
-  function sample(kind,at,rate=1){
+  function sample(kind,at,rate=1,level=1){
     const source=context.createBufferSource();source.buffer=samples[kind];source.playbackRate.value=rate;
-    source.connect(master);active.add(source);source.onended=()=>release(source,[source]);source.start(at);
+    const gain=context.createGain();gain.gain.value=level;source.connect(gain);gain.connect(master);
+    active.add(source);source.onended=()=>release(source,[source,gain]);source.start(at);
   }
   function envelope(gain,start,duration,level){
     gain.gain.setValueAtTime(.0001,start);
@@ -215,7 +216,7 @@
     if(event.type==='burst')sample('burst',context.currentTime);
     else if(event.type==='coin'){
       // Polyphonic cached buffers: every pickup starts now, with no backlog.
-      sample('coin',context.currentTime,1+(coinSequence++%5)*.025);
+      sample('coin',context.currentTime,1+(coinSequence++%5)*.025,.8);
     }else if(event.type==='jump')sample('jump',context.currentTime,event.automatic?1.12:1);
     else if(event.type==='rush'){
       noise(.3,.12,1800);tone(180,780,.38,.18,0,'triangle');
