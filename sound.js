@@ -2,6 +2,7 @@
   'use strict';
   const settings=window.RushAudioConfig||{},enabled=settings.enabled!==false;
   const volume=value=>Math.max(0,Math.min(1,Number(value)||0));
+  const coinLevel=volume(settings.coinVolume??.45);
   const now=()=>typeof performance!=='undefined'?performance.now():Date.now();
   const mobile=typeof navigator!=='undefined'&&(navigator.maxTouchPoints>0||/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||''));
   let context=null,master=null,noiseBuffer=null,samples={},resumePromise=null,resumeAttempt=0;
@@ -58,7 +59,7 @@
     const voice=bank.find(voice=>voice.audio.paused||voice.audio.ended)||bank.reduce((a,b)=>a.serial<b.serial?a:b);
     const audio=voice.audio,serial=++voice.serial;
     try{
-      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?.8:1);
+      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?coinLevel:1);
       audio.playbackRate=event.type==='coin'?1+(coinSequence++%5)*.025:1;
       Promise.resolve(audio.play()).then(()=>{
         if(voice.serial===serial&&(!playing||document.hidden))audio.pause();
@@ -216,7 +217,7 @@
     if(event.type==='burst')sample('burst',context.currentTime);
     else if(event.type==='coin'){
       // Polyphonic cached buffers: every pickup starts now, with no backlog.
-      sample('coin',context.currentTime,1+(coinSequence++%5)*.025,.8);
+      sample('coin',context.currentTime,1+(coinSequence++%5)*.025,coinLevel);
     }else if(event.type==='jump')sample('jump',context.currentTime,event.automatic?1.12:1);
     else if(event.type==='rush'){
       noise(.3,.12,1800);tone(180,780,.38,.18,0,'triangle');

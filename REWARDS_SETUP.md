@@ -16,7 +16,7 @@ Use a wallet you control and fund it with the announced token budgets. It needs 
 
 ## Default daily prize distribution
 
-One best score per reward wallet; top ten distinct eligible wallets. The same split applies to the Catoshi pool and the RUSH pool independently.
+One best score per reward wallet; top ten distinct reward wallets with completed, checked scores. The same split applies to the Catoshi pool and the RUSH pool independently.
 
 | Rank | Share | Catoshi from a 100,000 pool |
 | --- | --- | --- |
@@ -33,7 +33,7 @@ One best score per reward wallet; top ten distinct eligible wallets. The same sp
 
 To change it, set `REWARD_SPLIT=30,20,12,10,8,6,5,4,3,2` to ten positive integer percentages totaling 100. With fewer than ten eligible finishers, the occupied ranks' weights are normalized so they share the full pools. Native token units are allocated exactly; rounding remainders go from the highest rank downward.
 
-Players must hold 50,000 Catoshi at entry and when the team prepares the payout plan. No wallet connection or signature is requested. The pasted address is both the eligibility address and reward recipient. Anyone can type a public address; the app does not prove ownership.
+Entry is free for everyone with unlimited runs. No token holdings, wallet connection or signature is required at entry or payout. The pasted public address is the reward recipient; the app validates its format but does not prove ownership.
 
 Days close at 00:00 UTC. After either prize pool is announced, that day's settings are saved and fixed. Later changes apply the next day. Enabling rewards can add the first budget to a current day that previously had no prizes. Setting `REWARDS_ENABLED=false` pauses new prizes without deleting an existing saved budget or payout obligation.
 
@@ -48,7 +48,7 @@ node admin.cjs rounds
 node admin.cjs payout-plan ROUND_ID
 ```
 
-Prepare the plan after the round ends plus **11 minutes**. Review the top-ten runs, saved recipient addresses and mint/amount pairs. The plan checks eligibility and funding for both tokens, accounts for other unpaid plans, and reserves exact token amounts. Re-running it returns the same plan.
+Prepare the plan after the round ends plus **11 minutes**. Review the top-ten runs, saved recipient addresses and mint/amount pairs. The plan selects reviewed scores without checking any winner's holdings and verifies vault funding for both tokens, accounts for other unpaid plans, and reserves exact token amounts. Re-running it returns the same plan.
 
 After signing approved transfers from the recorded vault, record their finalized signatures:
 
@@ -63,6 +63,6 @@ There is no scheduled payout worker or private signing key in this package. No R
 
 ## Daily scores and red RUSH quest
 
-Each wallet has ten holder starts per UTC day. Only completed, replay-checked runs earn red quest progress. Ten red pickups across that day double its best raw-score run, with a maximum of five pickups in any run. A later better raw score inherits the multiplier; lower runs stay unmultiplied. X sharing adds no points. Rankings and payout plans use the adjusted best score, with one position per wallet.
+Every wallet can play unlimited free runs. No Catoshi holdings are required; paste the public Solana address that should receive prizes. Only its best completed score occupies a leaderboard/prize position. Only completed, replay-checked runs earn red quest progress. Ten red pickups across that day double its best raw-score run, with a maximum of five pickups in any run. A later better raw score inherits the multiplier; lower runs stay unmultiplied. X sharing adds no points. Rankings and payout plans use the adjusted best score, with one position per wallet.
 
 Review runs and make any documented disqualifications before planning payouts. Disqualification recalculates the affected wallet's quest and scores. A saved payout plan freezes the whole UTC day against later score changes. No new reward variables are needed for these gameplay pickups. They do not send tokens; real CATOSHI/RUSH prizes still use the vault settings and externally signed team payments above.

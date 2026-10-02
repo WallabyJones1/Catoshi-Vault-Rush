@@ -54,3 +54,12 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 .brand-lockup h1{font-size:80px}
 #home-catoshi{width:100%;min-width:0;max-width:180px;justify-self:end}
 @media(max-width:600px){.brand-lockup h1{font-size:clamp(50px,15vw,72px)}}
+
+/* One free entry form; reserve the hero box before its animated image loads. */
+#holder-entry{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
+#home-catoshi{object-fit:contain;visibility:visible}
+.menu-controls{position:static;margin:24px 0 4px;flex-shrink:0}
+#gate{flex-direction:column;align-items:center;justify-content:flex-start}
+.gate-card{margin-top:auto;margin-bottom:auto}
+@media(min-width:601px){.menu-controls{align-self:flex-start;width:min(100%,400px)}}
+@media(orientation:landscape) and (max-height:600px){#gate{align-items:flex-start}.gate-card{margin-top:0}}

@@ -2,8 +2,8 @@
   'use strict';
   const $=id=>document.getElementById(id);
   const ENGINE='flow-web-9';
-  let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardMode='holder',boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
-  let submissionGeneration=0,lastMode='practice';
+  let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
+  let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
     const controller=new AbortController();
     const timer=setTimeout(()=>controller.abort(),timeout);
@@ -21,7 +21,6 @@
     if(!configPromise)configPromise=api('config',null,2500).then(value=>{
       if(value.engine!==ENGINE||(typeof VaultRush!=='undefined'&&VaultRush.VERSION!==ENGINE))throw Error('Please reload to get the current game version.');
       config=value;
-      $('practice-note').textContent='Practice board · no token rewards';
       const rewards=value.rewards;
       $('vault-status').textContent=value.vault
         ?'Vault '+value.vault.slice(0,4)+'…'+value.vault.slice(-4)+' · '+(value.prizesEnabled?'rewards enabled · team payout review':'rewards off')
@@ -99,48 +98,41 @@
   $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='UNLIMITED PLAYS · BEST SCORE COUNTS';updateBest(null);$('holder-daily').hidden=true;}});
   $('wallet').addEventListener('change',()=>restoreHolderName());
   restoreHolderName();
-  function name(practice){return (!practice?$('holder-name').value.trim():'')||$('player-name').value.trim()||'Runner';}
-  async function prepare(practice){
-    submissionGeneration++;lastResult=null;lastMode=practice?'practice':'holder';
+  async function prepare(){
+    submissionGeneration++;lastResult=null;
     $('again').disabled=false;$('again').textContent='RIDE AGAIN';
-    try{
-      const displayName=name(practice),rewardWallet=entryWallet;
-      await getConfig();
-      const ticket=await api('runs/start',{name:displayName,mode:practice?'practice':'holder',engine:ENGINE,...(!practice?{wallet:rewardWallet}:{})});
-      if(!practice){rememberHolderName(rewardWallet,displayName);updateStatus(ticket);}
-      return ticket;
-    }catch(error){
-      // Static/offline practice is deliberately independent of the server.
-      if(practice){$('practice-note').textContent='Local practice · leaderboard unavailable for this run';return null;}
-      throw error;
-    }
+    const displayName=$('holder-name').value.trim()||'Runner',rewardWallet=entryWallet;
+    await getConfig();
+    const ticket=await api('runs/start',{name:displayName,mode:'holder',engine:ENGINE,wallet:rewardWallet});
+    rememberHolderName(rewardWallet,displayName);updateStatus(ticket);
+    return ticket;
   }
   async function submit(ticket,ticks,inputs){
     lastResult=null;
     const generation=++submissionGeneration;
-    if(!ticket){$('submission-status').textContent='Offline practice · not submitted to the live leaderboard';return null;}
+    if(!ticket){$('submission-status').textContent='Run not reserved · score cannot be submitted';return null;}
     $('submission-status').textContent='Checking your run and saving your score…';
     try{
       const result=await api('runs/finish',{id:ticket.id,ticks,inputs});
       if(generation!==submissionGeneration)return null;
       lastResult=result;updateStatus(result.daily||result);
-      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · '+(ticket.mode==='holder'?'daily prize board':'practice board');
+      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · '+'daily leaderboard';
       const dayLabel=result.daily&&result.daily.round!==result.run.round?'PREVIOUS UTC DAY':'TODAY';
-      $('personal-best').textContent=ticket.mode==='holder'&&result.best
+      $('personal-best').textContent=result.best
         ?(result.best.id===result.run.id?'BEST RUN ':'YOUR BEST ')+dayLabel+' · '+result.best.score.toLocaleString()+' POINTS'+(result.best.rank?' · #'+result.best.rank:'')
         :'';
-      if(ticket.mode==='holder'&&result.quest){
+      if(result.quest){
         $('result-quest').textContent=result.quest.unlocked?'RED RUSH QUEST COMPLETE · 2× on your best run for this UTC day.'
           :result.quest.collected+' / 10 RED RUSH TODAY · '+result.quest.remaining+' more to double your best run.';
         if(result.best?.pointsMultiplier===2)$('personal-best').textContent+=' · 2× QUEST';
       }
       return result;
-    }catch(error){if(generation===submissionGeneration){$('submission-status').textContent='Score not posted: '+error.message;if(ticket.mode==='holder')$('result-quest').textContent='This run has not been added to your daily quest.';}return null;}
+    }catch(error){if(generation===submissionGeneration){$('submission-status').textContent='Score not posted: '+error.message;$('result-quest').textContent='This run has not been added to your daily quest.';}return null;}
   }
-  function share(run,practice,result){
+  function share(run,result){
     const checked=result?.run;
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
-    const kind=checked?(checked.mode==='holder'?'prize run':'practice run'):'local practice';
+    const kind=checked?'checked daily run':'score pending verification';
     const text=`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
     const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/':'');
     $('share-x').href='https://twitter.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});
@@ -152,17 +144,16 @@
     };
   }
   async function board(){
-    const generation=++boardGeneration,mode=boardMode,round=boardRound;
+    const generation=++boardGeneration,round=boardRound;
     try{
-      $('board-holder').setAttribute('aria-pressed',String(boardMode==='holder'&&boardRound===null));
-      $('board-practice').setAttribute('aria-pressed',String(boardMode==='practice'));
-      $('board-previous').setAttribute('aria-pressed',String(boardMode==='holder'&&boardRound!==null));
-      const value=await api('leaderboard?mode='+mode+(round!==null?'&round='+round:''));
+      $('board-holder').setAttribute('aria-pressed',String(boardRound===null));
+      $('board-previous').setAttribute('aria-pressed',String(boardRound!==null));
+      const value=await api('leaderboard'+(round!==null?'?round='+round:''));
       if(generation!==boardGeneration)return;
       const body=$('leaderboard-rows');body.textContent='';
       for(const entry of value.entries){
         const row=document.createElement('tr');
-        if(mode==='holder'&&entry.rank<=10)row.className='prize-position';
+        if(entry.rank<=10)row.className='prize-position';
         for(const [index,field]of [entry.rank,entry.name,entry.score.toLocaleString(),entry.distance+'m'].entries()){
           const cell=document.createElement('td');cell.textContent=field;
           if(index===2&&entry.pointsMultiplier===2){const badge=document.createElement('small');badge.className='bonus-badge';badge.textContent='2×';cell.appendChild(badge);}
@@ -174,13 +165,11 @@
       $('leaderboard-status').textContent=value.entries.length
         ?'Updated '+new Date(value.updatedAt).toLocaleTimeString()+' · best run per player'
         :'No scores yet. Be the first to finish a run.';
-      $('leaderboard-explainer').textContent=boardMode==='holder'
-        ?(boardRound===null?'Today (UTC)':'Yesterday (UTC)')+' · unlimited plays per wallet · best score counts · collect 10 red RUSH for 2× · top 10 share enabled prizes after team review.'
-        :'All-time practice · no token rewards. Names are public; duplicate names are possible.';
+      $('leaderboard-explainer').textContent=(round===null?'Today (UTC)':'Yesterday (UTC)')+' · unlimited plays per wallet · best score counts · collect 10 red RUSH for 2× · top 10 share enabled prizes after team review.';
       const remaining=Math.max(0,(value.round+1)*86400000-value.updatedAt);
-      $('board-round-time').textContent=mode!=='holder'?'BEST COMPLETED PRACTICE RUNS':round!==null?'PREVIOUS UTC DAY · CLOSED'
+      $('board-round-time').textContent=round!==null?'PREVIOUS UTC DAY · CLOSED'
         :'RESETS IN '+Math.floor(remaining/3600000)+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · UTC';
-    }catch(error){if(generation===boardGeneration)$('leaderboard-status').textContent='Could not refresh rankings. '+error.message+' Use Refresh to retry; practice is still available.';}
+    }catch(error){if(generation===boardGeneration)$('leaderboard-status').textContent='Could not refresh rankings. '+error.message+' Use Refresh to retry.';}
   }
   function openBoard(){
     previousFocus=document.activeElement;$('leaderboard-panel').hidden=false;$('close-leaderboard').focus();board();
@@ -191,10 +180,9 @@
   $('result-leaderboard').addEventListener('click',openBoard);
   $('close-leaderboard').addEventListener('click',closeBoard);
   $('board-refresh').addEventListener('click',board);
-  $('board-holder').addEventListener('click',()=>{boardMode='holder';boardRound=null;board();});
-  $('board-practice').addEventListener('click',()=>{boardMode='practice';boardRound=null;board();});
+  $('board-holder').addEventListener('click',()=>{boardRound=null;board();});
   $('board-previous').addEventListener('click',async()=>{
-    try{const current=await api('config');boardMode='holder';boardRound=current.round-1;board();}
+    try{const current=await api('config');boardRound=current.round-1;board();}
     catch(_){$('leaderboard-status').textContent='Could not load the previous round.';}
   });
   document.addEventListener('keydown',event=>{

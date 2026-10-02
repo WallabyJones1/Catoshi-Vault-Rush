@@ -15,6 +15,7 @@ const STATIC_FILES=new Map([
   ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],
   ['sound.js','text/javascript'],['audio-config.js','text/javascript'],['catoshi-coin.png','image/png'],
   ['rush-pickups-v1.png','image/png'],['rush-pickups-v2.png','image/png'],['home.js','text/javascript'],['catoshi-home-loop-v1.png','image/png'],
+  ['catoshi-home-v2.webp','image/webp'],['catoshi-home-v2.gif','image/gif'],['catoshi-home-still-v2.png','image/png'],
   ...['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red'].map(kind=>['sfx-'+kind+'-v1.wav','audio/wav']),
   ['music.mp3','audio/mpeg'],['music.ogg','audio/ogg'],['music.wav','audio/wav'],
   ['canyon-atmosphere.png','image/png'],['canyon-endless-layers.png','image/png'],
@@ -167,8 +168,8 @@ function createApp(config,options={}) {
           json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-wallet',redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
-          const mode=url.searchParams.get('mode')==='holder'?'holder':'practice';
-          const raw=url.searchParams.get('round');let round=mode==='practice'?-1:Math.floor(now()/ROUND_MS);
+          const mode='holder';
+          const raw=url.searchParams.get('round');let round=Math.floor(now()/ROUND_MS);
           if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
           json(res,{mode,round,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
         }
@@ -202,11 +203,12 @@ function createApp(config,options={}) {
         }
         if(url.pathname==='/api/runs/start'){
           rate(req,'starts',60,user.id);
-          const mode=data.mode==='holder'?'holder':'practice';const name=playerName(data.name);
+          if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Reload and paste your rewards wallet.');
+          const mode='holder',name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
           // Legacy mode 'holder' stores all daily prize entries so existing
           // scores and reward records remain intact. No holdings are required.
-          const rewardWallet=mode==='holder'?walletAddress(data.wallet):null;
+          const rewardWallet=walletAddress(data.wallet);
           const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
           ensureRound(db,round,config,ROUND_MS);
           // Record starts for daily progress only, without any play limit.

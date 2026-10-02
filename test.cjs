@@ -102,15 +102,16 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   const rules=(await request('/api/config')).value;assert.equal(rules.minimumTokens,0);assert(!rules.prizesEnabled);assert(!rules.paidModeEnabled);
   assert.equal((await request('/api/runs/start',{mode:'practice',engine:security.ENGINE_VERSION},'https://evil.invalid')).res.status,403);
   assert.equal((await request('/api/runs/start',{mode:'holder',engine:security.ENGINE_VERSION})).res.status,400);
-  const ticket=(await request('/api/runs/start',{name:'Cat Runner',mode:'practice',engine:security.ENGINE_VERSION})).value;assert(ticket.id&&ticket.seed);
+  assert.equal((await request('/api/runs/start',{mode:'practice',wallet,engine:security.ENGINE_VERSION})).res.status,400);
+  const ticket=(await request('/api/runs/start',{name:'Cat Runner',wallet:security.MINT,engine:security.ENGINE_VERSION})).value;assert(ticket.id&&ticket.seed);
   const simulation=simulate(ticket.seed);clock+=simulation.ticks/120*1000+2000;
   const result=await request('/api/runs/finish',{id:ticket.id,ticks:simulation.ticks,inputs:simulation.inputs,score:999999999});
   assert.equal(result.res.status,200);assert.equal(result.value.run.score,Math.floor(simulation.run.score));assert.equal(result.value.rank,1);
   assert((await request('/api/runs/finish',{id:ticket.id})).value.duplicate);
-  const board=(await request('/api/leaderboard?mode=practice')).value;assert.equal(board.entries[0].name,'Cat Runner');assert(!Object.hasOwn(board.entries[0],'session'));
+  const board=(await request('/api/leaderboard')).value;assert.equal(board.entries[0].name,'Cat Runner');assert(!Object.hasOwn(board.entries[0],'session'));
   assert.match((await request('/score/'+ticket.id)).value,/og:title/);
   for(const file of ['server.cjs','.env','security.cjs','test.cjs','data/catoshi.sqlite'])assert.equal((await request('/'+file)).res.status,404);
-  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','home.js','catoshi-home-loop-v1.png','rush-pickups-v2.png'])assert.equal((await request('/'+file)).res.status,200);
+  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','home.js','catoshi-home-loop-v1.png','catoshi-home-v2.webp','catoshi-home-v2.gif','catoshi-home-still-v2.png','rush-pickups-v2.png'])assert.equal((await request('/'+file)).res.status,200);
   const range=await fetch(base+'/music.mp3',{headers:{Range:'bytes=0-31'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-length'),'32');assert.equal((await range.arrayBuffer()).byteLength,32);
   for(const kind of ['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red']){
     const response=await fetch(base+'/sfx-'+kind+'-v1.wav',{headers:{Range:'bytes=0-43'}});
@@ -127,7 +128,7 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   const holderRun=simulate(holder.seed);clock+=holderRun.ticks/120*1000+2000;
   assert.equal((await request('/api/runs/finish',{id:holder.id,ticks:holderRun.ticks,inputs:holderRun.inputs,wallet:security.MINT})).res.status,200);
   assert.equal(app.db.prepare('SELECT wallet FROM runs WHERE id=?').get(holder.id).wallet,wallet,'finish cannot redirect the reward address');
-  const holders=(await request('/api/leaderboard?mode=holder')).value;assert.equal(holders.entries[0].name,'Holder');assert.notEqual(holders.entries[0].wallet,wallet);
+  const holders=(await request('/api/leaderboard?mode=holder')).value;assert(holders.entries.some(entry=>entry.name==='Holder'));assert(holders.entries.every(entry=>entry.wallet!==wallet),'public wallet is abbreviated');
   assert.equal((await request('/api/runs/finish',{id:holder.id},base,'')).res.status,404);
 });
 test('SQLite rankings survive reopening durable storage',()=>{
@@ -163,17 +164,21 @@ class Element {
   dispatch(type,data={}){return Promise.all((this.listeners[type]||[]).map(fn=>fn({preventDefault(){},target:this,...data})));}
   appendChild(){}focus(){}setPointerCapture(){}setAttribute(){}
 }
-test('practice button, touch/keyboard, pause/resume, failed wallet lookup and vault burst UI wiring',async()=>{
+test('one Play button, touch/keyboard, pause/resume, failed server start and vault burst UI wiring',async()=>{
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
   const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element(m[1])]));
   const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
   document.querySelectorAll=()=>['gate','game-screen','result'].map(id=>elements[id]);document.createElement=tag=>new Element(tag);
   elements.game.getContext=()=>({fillRect(){}});let now=0,frame=null,createdRun,bursts=0,sounds=0;
-  window.RushOnline={prepare:async practice=>{if(!practice)throw Error('offline');return null;},submit:async()=>null,share(){},setWallet(){}};
+  let startsFail=false,prepares=0;const ticket={id:'ticket',wallet:security.MINT,seed:123,maxTicks:72000};
+  window.RushOnline={prepare:async()=>{prepares++;if(startsFail)throw Error('offline');return ticket;},submit:async()=>null,share(){},setWallet(){}};
   window.RushSound={unlock(){},setPlaying(){},effect(){sounds++;},burst(){bursts++;}};
   const context={document,window,console,setTimeout,clearTimeout,performance:{now:()=>now},VaultRush:{Run:class extends Run{constructor(seed){super(seed);createdRun=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
-  await elements['practice-button'].dispatch('click');assert(createdRun);
+  assert(!elements['practice-button']&&!elements['board-practice']);
+  elements.wallet.value='invalid';await elements['wallet-form'].dispatch('submit');assert.equal(prepares,0);
+  elements.wallet.value=security.MINT;await elements['wallet-form'].dispatch('submit');assert(createdRun);
+  await elements['wallet-form'].dispatch('submit');assert.equal(prepares,1,'repeat submit cannot start a second run');
   const frames=count=>{for(let i=0;i<count;i++){now+=1000/60;const cb=frame;frame=null;cb?.(now);}};
   frames(20);assert.equal(createdRun.time,0,'no hidden simulation during vault animation');assert.equal(bursts,0);
   frames(100);assert.equal(bursts,1);
@@ -182,11 +187,11 @@ test('practice button, touch/keyboard, pause/resume, failed wallet lookup and va
   const before=createdRun.time;await elements.pause.dispatch('click');frames(100);assert.equal(createdRun.time,before);
   await elements.resume.dispatch('click');frames(10);assert(createdRun.time>before);
   await window.dispatch('keydown',{code:'Space'});assert(createdRun.player.held);await window.dispatch('keyup',{code:'Space'});assert(!createdRun.player.held);
-  await elements['pause-menu'].dispatch('click');elements.wallet.value=security.MINT;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/offline/);
-  let selected;window.RushOnline.prepare=async()=>null;window.RushOnline.setWallet=address=>{selected=address;};
-  await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'PRIZE RUN');
+  await elements['pause-menu'].dispatch('click');startsFail=true;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/offline/);assert(!elements['verify-button'].disabled,'failed start allows retry');
+  let selected;window.RushOnline.prepare=async()=>ticket;window.RushOnline.setWallet=address=>{selected=address;};
+  await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'DAILY RUN');
   await elements['pause-menu'].dispatch('click');
-  await elements['practice-button'].dispatch('click');assert(frame);
+  await elements['wallet-form'].dispatch('submit');assert(frame);
 });
 test('audio initialization needs no button and ignores the old saved mute preference',()=>{
  const document=new Element('document'),window=new Element('window');document.getElementById=()=>{throw Error('audio must not query a removed button');};
@@ -206,7 +211,7 @@ test('RPC failover and exact balances never grant entry on failed or malformed r
   await assert.rejects(security.tokenBalance(wallet,'https://unused.invalid',async()=>({ok:true,json:async()=>({result:{value:[{}]}})})),/Invalid token/);
 });
 
-test('practice starts locally after a working config but failed start API; holder sends only pasted wallet',async()=>{
+test('one free play mode requires a reserved run and remembers wallet names without connecting',async()=>{
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
   assert(!html.includes('CONNECT &amp; SIGN'));assert(html.includes('reward address'));
   const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element(m[1])]));
@@ -219,22 +224,21 @@ test('practice starts locally after a working config but failed start API; holde
     return {ok:!(startsFail&&url.endsWith('/runs/start')),json:async()=>startsFail&&url.endsWith('/runs/start')?{error:'Unavailable'}:value};
   };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,localStorage:{getItem:key=>storedNames.get(key),setItem:(key,value)=>storedNames.set(key,value)},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},location:{protocol:'file:'},URLSearchParams,console});
-  assert.equal(await window.RushOnline.prepare(true),null,'API failure must not block practice');
-  assert.match(elements['practice-note'].textContent,/Local practice/);
+  window.RushOnline.setWallet(security.MINT);
+  await assert.rejects(window.RushOnline.prepare(),/Unavailable/,'failed scored start never becomes an untracked local run');
   assert.equal(elements['vault-balance'].textContent,'1,234,567.89');
   assert.equal(elements['prize-pool'].textContent,'100,000 CATOSHI + 50 RUSH');
-  elements['player-name'].value='Practice Cat';
   elements['holder-name'].value='Wallaby';
   startsFail=false;window.RushOnline.setWallet(security.MINT);
-  const holder=await window.RushOnline.prepare(false);assert.equal(holder.wallet,security.MINT);
+  const holder=await window.RushOnline.prepare();assert.equal(holder.wallet,security.MINT);
   assert.equal(requests.at(-1)[1].wallet,security.MINT);assert.equal(requests.at(-1)[1].mode,'holder');
-  assert.equal(requests.at(-1)[1].name,'Wallaby','holder entry uses its dedicated name, not the practice name');
+  assert.equal(requests.at(-1)[1].name,'Wallaby','the one entry form sends its leaderboard name');
   assert.equal(storedNames.get('rush-holder-name:'+security.MINT),'Wallaby');
   const second=encode58(Buffer.alloc(32,9));storedNames.set('rush-holder-name:'+second,'Second Cat');
   elements.wallet.value=second;await elements.wallet.dispatch('input');assert.equal(elements['holder-name'].value,'Second Cat','changing wallet restores its own saved name');
   elements.wallet.value=security.MINT;await elements.wallet.dispatch('input');assert.equal(elements['holder-name'].value,'Wallaby');
   elements['holder-name'].value='New Name';await elements.wallet.dispatch('change');assert.equal(elements['holder-name'].value,'New Name','autofill must preserve manual edits');
-  await window.RushOnline.prepare(true);assert.equal(requests.at(-1)[1].name,'Practice Cat','practice keeps its own name');
+  await window.RushOnline.prepare();assert.equal(requests.at(-1)[1].name,'New Name');
   const checked=await window.RushOnline.progress(' '+security.MINT+' ');assert(checked.eligible);
   const lookup=requests.at(-1);assert.equal(lookup[1],null,'progress is a read-only GET');
   assert.equal(new URLSearchParams(lookup[0].split('?')[1]).get('wallet'),security.MINT);
@@ -459,7 +463,7 @@ test('audible blast and every coin start immediately, resume and stop with play 
   assert.equal(ctx.sources.filter(source=>source.buffer===blast).length,1);
   const chimes=ctx.sources.filter(source=>source.buffer===coin);assert.equal(chimes.length,3,'rapid pickups are not dropped');
   assert(chimes.every(source=>source.at===ctx.currentTime),'no per-coin delay or cumulative scheduling backlog');
-  assert(chimes.every(source=>source.output.gain.value===.8),'coin mix is 20% lower');
+  assert(chimes.every(source=>source.output.gain.value===.45),'coin mix is quiet without delaying playback');
   assert.equal(ctx.sources.find(source=>source.buffer===blast).output.gain.value,1,'other sounds keep their level');
   h.finishMusic();await Promise.resolve();assert.equal(h.music.pauses,0);
   ctx.state='interrupted';sound.effect({type:'coin'});assert.equal(ctx.resumes,2);ctx.wake();await Promise.resolve();
@@ -605,7 +609,7 @@ test('fallback clips preload once and replay immediately without changing source
  for(const kind of ['burst','jump','flip','crash','rush','redRush'])sound.effect({type:kind});
  assert.equal(voices.filter(voice=>voice.src==='sfx-coin-v1.wav').reduce((sum,voice)=>sum+voice.history.filter(src=>src==='sfx-coin-v1.wav').length,0),8,'fallback coin calls happen synchronously');
  assert.deepEqual(voices.map(voice=>({src:voice.src,loads:voice.loads})),initial,'events do not reload or switch media files');
- assert(voices.filter(v=>v.src==='sfx-coin-v1.wav').every(v=>v.volume===.72*.8),'fallback coins use the same quieter mix');
+ assert(voices.filter(v=>v.src==='sfx-coin-v1.wav').every(v=>v.volume===.72*.45),'fallback coins use the same quieter mix');
  assert.equal(voices.find(v=>v.src==='sfx-burst-v1.wav').volume,.72,'fallback blast stays unchanged');
  sound.setPlaying(false);assert(voices.every(voice=>voice.paused));
 });
@@ -642,4 +646,34 @@ test('a stalled fallback priming request can be retried and its late resolution 
  assert(voices.some(voice=>voice.history.includes('sfx-burst-v1.wav')));
  const counts=voices.map(voice=>voice.pauses);for(const voice of voices)voice.finishPlay();await Promise.resolve();
  assert.deepEqual(voices.map(voice=>voice.pauses),counts,'late priming results do not pause a playing effect');sound.setPlaying(false);
+});
+
+test('homepage uses a bundled native ten-frame loop without canvas or animation timers',()=>{
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+ assert.match(html,/<img id="home-catoshi" src="catoshi-home-v2.webp"/);
+ const bytes=fs.readFileSync(path.join(__dirname,'catoshi-home-v2.webp'));
+ assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WEBP');
+ let frames=0,loops,total=0;
+ for(let offset=12;offset<bytes.length;){
+  const kind=bytes.toString('ascii',offset,offset+4),length=bytes.readUInt32LE(offset+4);
+  if(kind==='ANIM')loops=bytes.readUInt16LE(offset+12);
+  if(kind==='ANMF'){frames++;total+=bytes.readUIntLE(offset+20,3);}
+  offset+=8+length+(length%2);
+ }
+ assert.equal(frames,10);assert.equal(loops,0,'loop forever');assert(total>=3000&&total<5000);
+ const setup=(reduced=false,failed=false)=>{
+  const hero=new Element('home-catoshi');hero.src='catoshi-home-v2.webp';hero.getAttribute=()=>hero.src;
+  hero.complete=failed;hero.naturalWidth=failed?0:320;
+  const preference={matches:reduced,addEventListener(_,fn){this.change=fn;}};
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'home.js'),'utf8'),{
+   document:{getElementById:()=>hero},window:{matchMedia:()=>preference},
+   requestAnimationFrame(){throw Error('the native loop must not depend on RAF');}
+  });return {hero,preference};
+ };
+ const normal=setup();assert.equal(normal.hero.src,'catoshi-home-v2.webp');
+ normal.hero.dispatch('error');assert.equal(normal.hero.src,'catoshi-home-v2.gif');
+ normal.hero.dispatch('error');assert.equal(normal.hero.src,'catoshi-home-still-v2.png');
+ const cachedFailure=setup(false,true);assert.equal(cachedFailure.hero.src,'catoshi-home-v2.gif');
+ const accessible=setup(true);assert.equal(accessible.hero.src,'catoshi-home-still-v2.png');
+ accessible.preference.matches=false;accessible.preference.change();assert.equal(accessible.hero.src,'catoshi-home-v2.webp');
 });

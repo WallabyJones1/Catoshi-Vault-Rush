@@ -13,7 +13,7 @@
   ].map(id => [id, $(id)]));
   const FIXED_STEP = 1 / 120;
   let run, renderer, artwork;
-  let phase = 'menu', resumePhase = 'running', practice = true, wallet = '';
+  let phase = 'menu', resumePhase = 'running', wallet = '';
   let raf = 0, last = 0, accumulator = 0, countdown = 0, resultDelay = 0, trickTime = 0;
   let startId = 0, walletRequest = 0, inputPointer = null, keyHeld = false;
   let ticket=null,ticks=0,recording=[];
@@ -57,16 +57,17 @@
     }
     return artwork;
   }
-  async function begin(isPractice = practice) {
+  async function begin() {
+    if(phase==='loading')return;
     sound.unlock(); sound.setPlaying(false);
     const operation = ++startId;
     walletRequest++;
-    ui['verify-button'].disabled = false;
+    ui['verify-button'].disabled = true;
     cancelAnimationFrame(raf); releaseInput();
-    phase = 'loading'; practice = isPractice;
+    phase = 'loading';
     ui['pause-panel'].hidden = true; ui.warning.hidden = true;
     ui.trick.classList.remove('visible'); ui.trick.textContent = '';
-    ui['mode-label'].textContent = practice ? 'PRACTICE' : 'PRIZE RUN';
+    ui['mode-label'].textContent = 'DAILY RUN';
     ui.countdown.textContent = 'LOADING';
     show('game-screen'); resizeGame(); drawLoading();
     try {
@@ -74,13 +75,14 @@
       // Load artwork before reserving a scored run ticket.
       const images=await artworkReady();
       if(operation!==startId)return;
-      const onlineTicket=await window.RushOnline.prepare(isPractice);
+      const onlineTicket=await window.RushOnline.prepare();
       if (operation !== startId) return;
+      if(!onlineTicket?.id||!onlineTicket.wallet||!Number.isInteger(onlineTicket.seed))throw new Error('Could not reserve your run. Please retry.');
       setRunTicket(onlineTicket);
       if(onlineTicket?.wallet)wallet=onlineTicket.wallet;
-      ui['mode-label'].textContent=practice?(onlineTicket?'PRACTICE':'LOCAL PRACTICE · NO LEADERBOARD'):'PRIZE RUN';
+      ui['mode-label'].textContent='DAILY RUN';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
-      run = new VaultRush.Run(onlineTicket?.seed||Date.now()); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
+      run = new VaultRush.Run(onlineTicket.seed); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       sound.setPlaying(true);
       phase = 'countdown'; countdown = 1.7; accumulator = 0; trickTime = 0;
       ui.countdown.textContent = 'READY';
@@ -90,7 +92,7 @@
     } catch (error) {
       if (operation !== startId) return;
       backToMenu();
-      status(error.message||'The game could not load. Please check your connection and try Play Practice again.','error');
+      status(error.message||'The game could not load. Please check your connection and press Play again.','error');
     }
   }
   function setRunTicket(value){ticket=value;ticks=0;recording=[];}
@@ -137,22 +139,20 @@
     ui['final-score'].textContent = Math.floor(run.score).toLocaleString();
     ui['final-coins'].textContent = run.coins;
     $('personal-best').textContent='';
-    $('result-quest').textContent=practice?'Practice collectibles do not count toward the daily quest.':'Checking daily quest…';
+    $('result-quest').textContent='Checking daily quest…';
     $('run-pickups').textContent=run.redTokens+' RED RUSH · '+run.rushPickups+' SPEED BURST'+(run.rushPickups===1?'':'S');
-    ui['result-kicker'].textContent = practice ? 'PRACTICE RUN' : 'DAILY PRIZE RUN';
+    ui['result-kicker'].textContent = 'DAILY RUN';
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
-    ui['result-copy'].textContent = practice
-      ? 'Practice runs do not earn token rewards.'
-      : 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Any prize requires manual review and payment by the team.';
+    ui['result-copy'].textContent = 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Enabled prizes are reviewed and paid by the team.';
     ui['submission-status']=$('submission-status');
     $('share-status').textContent='';
-    window.RushOnline.share(run,practice,null);
+    window.RushOnline.share(run,null);
     const finishedRun=run,finishedTicket=ticket,finishedTicks=ticks,finishedRecording=recording.slice(),finishedStart=startId;
     show('result');
     window.RushOnline.submit(finishedTicket,finishedTicks,finishedRecording).then(result=>{
       if(finishedStart!==startId||phase!=='result')return;
       if(result){ui['final-score'].textContent=result.run.score.toLocaleString();ui['final-distance'].textContent=result.run.distance+'m';ui['final-coins'].textContent=result.run.coins;}
-      window.RushOnline.share(finishedRun,practice,result);
+      window.RushOnline.share(finishedRun,result);
     });
   }
   function loop(now) {
@@ -220,8 +220,7 @@
   }
 
   // Prize entry is free; rewards are bound to the pasted public address.
-  $('practice-button').addEventListener('click',() => begin(true));
-  $('again').addEventListener('click',() => begin(practice));
+  $('again').addEventListener('click',() => begin());
   $('change-wallet').addEventListener('click',backToMenu);
   $('pause-menu').addEventListener('click',backToMenu);
   $('pause').addEventListener('click',pause);
@@ -240,7 +239,7 @@
       if (!event.repeat && !keyHeld && phase === 'running') { keyHeld = true; press(); }
     } else if (event.code === 'Escape' || event.code === 'KeyP') {
       if (!event.repeat) { event.preventDefault(); phase === 'paused' ? resume() : pause(); }
-    } else if (event.code === 'KeyR' && !event.repeat) begin(practice);
+    } else if (event.code === 'KeyR' && !event.repeat) begin();
   });
   window.addEventListener('keyup',event => {
     if (['Space','ArrowUp','KeyW'].includes(event.code)) { keyHeld = false; if (inputPointer === null) releaseHeld(); }
@@ -249,6 +248,7 @@
   document.addEventListener('visibilitychange',() => { if (document.hidden) pause(); });
   $('wallet-form').addEventListener('submit',async event => {
     event.preventDefault();
+    if(phase!=='menu'||ui['verify-button'].disabled)return;
     const address = $('wallet').value.trim();
     if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) { status('That does not look like a Solana wallet.','error'); return; }
     const request = ++walletRequest;
@@ -256,9 +256,9 @@
     try {
       if (request !== walletRequest || phase !== 'menu') return;
       wallet=address;window.RushOnline.setWallet(address);
-      await begin(false);
+      await begin();
     } catch (error) {
-      if (request === walletRequest && phase === 'menu') status(error.message||'Could not start this run. Retry shortly or play practice.','error');
+      if (request === walletRequest && phase === 'menu') status(error.message||'Could not start this run. Please retry shortly.','error');
     } finally { if (request === walletRequest) ui['verify-button'].disabled = false; }
   });
 })();
