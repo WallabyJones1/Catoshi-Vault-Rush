@@ -8,7 +8,8 @@ const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tok
 const {dailyQuest,syncHolderScores,publicRun,playerFilter,RUN_FIELDS}=require('./quest.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
-const ROUND_MS=86400000,GRACE_MS=660000;
+const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
+const GRACE_MS=660000,SESSION_MS=30*86400000;
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
 const STATIC_FILES=new Map([
@@ -96,12 +97,17 @@ function createApp(config,options={}) {
   function session(req,res){
     const cookie=req.headers.cookie?.match(/(?:^|;\s*)rush_session=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
     let record=cookie?db.prepare('SELECT * FROM sessions WHERE id=? AND expires>?').get(hash(cookie),now()):null;
+    let token=cookie;
     if(!record){
-      const token=crypto.randomBytes(32).toString('base64url');
-      record={id:hash(token),wallet:null,expires:now()+24*3600000};
+      token=crypto.randomBytes(32).toString('base64url');
+      record={id:hash(token),wallet:null,expires:now()+SESSION_MS};
       db.prepare('INSERT INTO sessions(id,wallet,expires)VALUES(?,?,?)').run(record.id,null,record.expires);
-      res.setHeader('Set-Cookie',`rush_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=86400${config.production?'; Secure':''}`);
-    }
+    }else if(record.expires<now()+SESSION_MS-86400000){
+      // Renew the same private guest identity, including old 24-hour cookies.
+      record.expires=now()+SESSION_MS;
+      db.prepare('UPDATE sessions SET expires=? WHERE id=?').run(record.expires,record.id);
+    }else return record;
+    res.setHeader('Set-Cookie',`rush_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${SESSION_MS/1000}${config.production?'; Secure':''}`);
     return record;
   }
   function json(res,data,status=200){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(data));}
@@ -113,27 +119,29 @@ function createApp(config,options={}) {
     if(!value||typeof value!=='object'||Array.isArray(value))throw new HttpError(400,'JSON object required.');
     return value;
   }
-  function holderQuota(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+  function holderQuota(wallet,round=currentRound(now()),guestSession){
     const owner=playerFilter(wallet,guestSession);
     const used=wallet?db.prepare('SELECT used FROM holder_attempts WHERE wallet=? AND round=?').get(wallet,round)?.used||0
       :db.prepare(`SELECT COUNT(*) used FROM runs WHERE ${owner.where} AND round=? AND mode='holder'`).get(owner.value,round).used;
-    return {limit:null,used,remaining:null,unlimited:true,resetsAt:(round+1)*ROUND_MS};
+    return {limit:null,used,remaining:null,unlimited:true,resetsAt:roundWindow(round).end};
   }
-  function holderBest(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+  function holderBest(wallet,round=currentRound(now()),guestSession){
     const owner=playerFilter(wallet,guestSession);
     const run=db.prepare(`SELECT ${RUN_FIELDS} FROM runs WHERE ${owner.where} AND mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY score DESC,submitted ASC,id ASC LIMIT 1`).get(owner.value,round);
     if(!run)return null;
     const rank=ranking('holder',round).findIndex(value=>value.id===run.id)+1;
     return {...publicRun(run),rank:rank||null};
   }
-  function holderStatus(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+  function holderStatus(wallet,round=currentRound(now()),guestSession){
     const owner=playerFilter(wallet,guestSession);
-    const history=db.prepare(`SELECT ${RUN_FIELDS},started,expires,disqualified FROM runs WHERE ${owner.where} AND mode='holder' AND round=? ORDER BY started DESC,rowid DESC LIMIT 10`).all(owner.value,round).map(run=>({...publicRun(run),started:run.started,status:run.disqualified?'reviewed out':run.submitted!==null?'completed':run.expires<now()?'expired':'in progress'}));
-    return {wallet,prizeEligible:Boolean(wallet),round,quota:holderQuota(wallet,round,guestSession),best:holderBest(wallet,round,guestSession),quest:dailyQuest(db,wallet,round,guestSession),history};
+    const history=db.prepare(`SELECT ${RUN_FIELDS},expires,disqualified FROM runs WHERE ${owner.where} AND mode='holder' AND round=? ORDER BY started DESC,rowid DESC LIMIT 10`).all(owner.value,round).map(run=>({...publicRun(run),status:run.disqualified?'reviewed out':run.submitted!==null?'completed':run.expires<now()?'expired':'in progress'}));
+    const window=roundWindow(round);
+    return {wallet,prizeEligible:Boolean(wallet),round,period:window.period,roundStarts:window.start,roundEnds:window.end,quota:holderQuota(wallet,round,guestSession),best:holderBest(wallet,round,guestSession),quest:dailyQuest(db,wallet,round,guestSession,dayAt(now())),history};
   }
   function ownResult(run,req,extra={}){
     const ranks=ranking(run.mode,run.mode==='holder'?run.round:-1),rank=ranks.findIndex(value=>value.id===run.id)+1;
-    return {run:publicRun(run),rank:rank||null,url:siteOrigin(req)+'/score/'+run.id,...(run.mode==='holder'?{prizeEligible:Boolean(run.wallet),quota:holderQuota(run.wallet,undefined,run.session),best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session),daily:holderStatus(run.wallet,undefined,run.session)}:{}),...extra};
+    const progress=run.mode==='holder'?holderStatus(run.wallet,undefined,run.session):null;
+    return {run:publicRun(run),rank:rank||null,url:siteOrigin(req)+'/score/'+run.id,serverTime:now(),...(progress?{prizeEligible:Boolean(run.wallet),quota:progress.quota,best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session,dayAt(run.started)),progress,daily:progress}:{}),...extra};
   }
   function ranking(mode,round){
     return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
@@ -167,16 +175,17 @@ function createApp(config,options={}) {
         rate(req,'api',180);
         if(req.method==='POST'&&!sameOrigin(req))throw new HttpError(403,'Same-origin request required.');
         if(req.method==='GET'&&url.pathname==='/api/config'){
-          const round=Math.floor(now()/ROUND_MS);
-          const snapshot=ensureRound(db,round,config,ROUND_MS);
+          const round=currentRound(now()),window=roundWindow(round);
+          const snapshot=ensureRound(db,round,config);
           const rewards=publicRewards(snapshot,config);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode='holder';
-          const raw=url.searchParams.get('round');let round=Math.floor(now()/ROUND_MS);
+          const raw=url.searchParams.get('round');let round=currentRound(now());
           if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
-          json(res,{mode,round,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
+          const window=roundWindow(round);
+          json(res,{mode,round,period:window.period,roundStarts:window.start,roundEnds:window.end,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
         }
         if(req.method==='GET'&&['/api/player-status','/api/holder-status','/api/balance'].includes(url.pathname)){
           const raw=url.searchParams.get('wallet');
@@ -212,12 +221,12 @@ function createApp(config,options={}) {
           if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Please reload the game.');
           const mode='holder',name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
-          // Legacy mode 'holder' stores all daily prize entries so existing
+          // Legacy mode 'holder' stores all free prize entries so existing
           // scores and reward records remain intact. Wallets and holdings are optional.
           const rewardWallet=rewardAddress(data.wallet);
-          const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
-          ensureRound(db,round,config,ROUND_MS);
-          // Record starts for daily progress only, without any play limit.
+          const round=currentRound(now()),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
+          ensureRound(db,round,config);
+          // Record starts for weekly progress only, without any play limit.
           // Keep the durable counter and ticket in one transaction.
           db.exec('BEGIN IMMEDIATE');
           try{
@@ -225,7 +234,7 @@ function createApp(config,options={}) {
               db.prepare('INSERT OR IGNORE INTO holder_attempts(wallet,round,used)VALUES(?,?,0)').run(rewardWallet,round);
               db.prepare('UPDATE holder_attempts SET used=used+1 WHERE wallet=? AND round=?').run(rewardWallet,round);
             }
-            db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
+            db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,roundWindow(round).end+GRACE_MS),ENGINE_VERSION);
             db.exec('COMMIT');
           }catch(error){db.exec('ROLLBACK');throw error;}
           json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS,...holderStatus(rewardWallet,round,user.id)});return;
@@ -240,14 +249,14 @@ function createApp(config,options={}) {
           if(!Number.isInteger(data.ticks)||data.ticks>Math.floor((now()-saved.started+2000)/1000*120))throw new HttpError(400,'Run elapsed time is invalid.');
           const checked=await checkReplay(saved.seed,data.ticks,data.inputs);
           // Recheck expiry after asynchronous replay, then save its native
-          // collectible totals and recalculate the day's best in one commit.
+          // collectible totals and recalculate that start-day's boost in one commit.
           if(saved.expires<now())throw new HttpError(410,'This run expired. Start a new run.');
           db.exec('BEGIN IMMEDIATE');
           try{
-            if(saved.wallet&&(db.prepare('SELECT round FROM reward_plans WHERE round=? UNION SELECT round FROM payouts WHERE round=?').get(saved.round,saved.round)))throw new HttpError(409,'This day is closed for payout review.');
+            if(db.prepare('SELECT round FROM reward_plans WHERE round=? UNION SELECT round FROM payouts WHERE round=?').get(saved.round,saved.round))throw new HttpError(409,'This round is closed for payout review.');
             const changed=db.prepare('UPDATE runs SET ticks=?,score=?,raw_score=?,distance=?,coins=?,red_tokens=?,rush_pickups=?,reason=?,submitted=?,inputs=? WHERE id=? AND submitted IS NULL').run(data.ticks,checked.score,checked.score,checked.distance,checked.coins,checked.redTokens,checked.rushPickups,checked.reason,now(),JSON.stringify(data.inputs),saved.id);
             if(changed.changes!==1)throw new HttpError(409,'Run already submitted.');
-            if(saved.mode==='holder')syncHolderScores(db,saved.wallet,saved.round,saved.session);
+            if(saved.mode==='holder')syncHolderScores(db,saved.wallet,saved.round,saved.session,dayAt(saved.started));
             db.exec('COMMIT');
           }catch(error){db.exec('ROLLBACK');throw error;}
           const record=db.prepare('SELECT * FROM runs WHERE id=?').get(saved.id);
@@ -263,7 +272,7 @@ function createApp(config,options={}) {
         const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
         if(!run)throw new HttpError(404,'Score not found.');
         const title=escapeHtml(`${run.name} scored ${run.score.toLocaleString()} in Catoshi Vault Rush`);
-        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?'daily':'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?roundWindow(run.round).period:'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
         filename='index.html';
       }
       if(!STATIC_FILES.has(filename))throw new HttpError(404,'Not found.');
@@ -300,4 +309,4 @@ if(require.main===module){
   app.server.listen(config.port,'0.0.0.0',()=>console.log('Catoshi web server listening on port',config.port));
   for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{app.server.close(()=>{app.db.close();process.exit(0);});});
 }
-module.exports={createApp,openDatabase,configFromEnv,ROUND_MS,GRACE_MS};
+module.exports={createApp,openDatabase,configFromEnv,ROUND_MS,GRACE_MS,currentRound,roundWindow};

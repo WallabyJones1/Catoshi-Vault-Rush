@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-10';
+  const ENGINE='flow-web-11';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
@@ -37,11 +37,11 @@
   }
   function updateQuota(quota){
     if(!quota)return;
-    $('holder-runs').textContent=quota.used+' RUN'+(quota.used===1?'':'S')+' TODAY';
+    $('holder-runs').textContent=quota.used+' RUN'+(quota.used===1?'':'S')+' THIS WEEK';
     $('again').disabled=false;$('again').textContent='RIDE AGAIN';
   }
   function updateBest(best){
-    $('holder-best').textContent=best?'BEST TODAY · '+best.score.toLocaleString()+' POINTS'+(best.pointsMultiplier===2?' · 2× QUEST':'')+(best.rank?' · #'+best.rank:''):'';
+    $('holder-best').textContent=best?'BEST THIS WEEK · '+best.score.toLocaleString()+' POINTS'+(best.pointsMultiplier===2?' · 2× QUEST':'')+(best.rank?' · #'+best.rank:''):'';
   }
   function updateDaily(value){
     if(!value?.quest)return;
@@ -77,7 +77,7 @@
     try{localStorage.setItem('rush-holder-name:'+address,value);}catch{}
     $('holder-name').value=value;suggestedHolderName=value;
   }
-  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='0 RUNS TODAY';updateBest(null);$('holder-daily').hidden=true;}});
+  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='0 RUNS THIS WEEK';updateBest(null);$('holder-daily').hidden=true;}});
   $('wallet').addEventListener('change',()=>restoreHolderName());
   restoreHolderName();
   async function prepare(){
@@ -99,15 +99,16 @@
     try{
       const result=await api('runs/finish',{id:ticket.id,ticks,inputs});
       if(generation!==submissionGeneration)return null;
-      lastResult=result;updateStatus(result.daily||result);
-      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · '+'daily leaderboard';
-      const dayLabel=result.daily&&result.daily.round!==result.run.round?'PREVIOUS UTC DAY':'TODAY';
+      const progress=result.progress||result.daily;
+      lastResult=result;updateStatus(progress||result);
+      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · weekly leaderboard';
+      const weekLabel=progress&&progress.round!==result.run.round?'LAST WEEK':'THIS WEEK';
       $('personal-best').textContent=result.best
-        ?(result.best.id===result.run.id?'BEST RUN ':'YOUR BEST ')+dayLabel+' · '+result.best.score.toLocaleString()+' POINTS'+(result.best.rank?' · #'+result.best.rank:'')
+        ?(result.best.id===result.run.id?'BEST RUN ':'YOUR BEST ')+weekLabel+' · '+result.best.score.toLocaleString()+' POINTS'+(result.best.rank?' · #'+result.best.rank:'')
         :'';
       if(result.quest){
         $('result-quest').textContent=result.quest.unlocked?'RED RUSH QUEST COMPLETE · 2× on your best run for this UTC day.'
-          :result.quest.collected+' / 10 RED RUSH TODAY · '+result.quest.remaining+' more to double your best run.';
+          :result.quest.collected+' / 10 RED RUSH · '+result.quest.remaining+' more to double your best run for that UTC day.';
         if(result.best?.pointsMultiplier===2)$('personal-best').textContent+=' · 2× QUEST';
       }
       return result;
@@ -116,7 +117,7 @@
   function share(run,result){
     const checked=result?.run;
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
-    const kind=checked?'checked daily run':'score pending verification';
+    const kind=checked?'checked weekly run':'score pending verification';
     const text=`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
     const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/':'');
     $('share-x').href='https://twitter.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});
@@ -156,10 +157,10 @@
         cell.colSpan=4;cell.className='board-empty';cell.textContent='No runs yet. Set the first score.';row.appendChild(cell);body.appendChild(row);}
       $('leaderboard-status').className='status board-live';
       $('leaderboard-status').textContent='LIVE · '+new Date(value.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-      $('leaderboard-explainer').textContent='BEST RUN PER PLAYER · '+(round===null?'TODAY':'YESTERDAY');
-      const remaining=Math.max(0,(value.round+1)*86400000-value.updatedAt);
+      $('leaderboard-explainer').textContent='BEST RUN PER PLAYER · '+(round===null?'THIS WEEK':'LAST WEEK');
+      const remaining=Math.max(0,value.roundEnds-value.updatedAt);
       $('board-round-time').textContent=round!==null?'CLOSED · UTC'
-        :'RESETS '+Math.floor(remaining/3600000)+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · UTC';
+        :'RESETS '+Math.floor(remaining/86400000)+'D '+String(Math.floor(remaining/3600000)%24).padStart(2,'0')+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · MON 00:00 UTC';
     }catch(error){if(generation===boardGeneration){$('leaderboard-status').className='status error';$('leaderboard-status').textContent='Could not refresh. '+error.message;}}
   }
   function openBoard(){
@@ -173,7 +174,7 @@
   $('board-refresh').addEventListener('click',board);
   $('board-holder').addEventListener('click',()=>{boardRound=null;board();});
   $('board-previous').addEventListener('click',async()=>{
-    try{const current=await api('config');boardRound=current.round-1;board();}
+    try{const current=await api('config');boardRound=current.previousRound??current.round-1;board();}
     catch(_){$('leaderboard-status').textContent='Could not load the previous round.';}
   });
   document.addEventListener('keydown',event=>{
@@ -192,12 +193,12 @@
   });
   $('check-day').addEventListener('click',async()=>{
     const address=$('wallet').value.trim(),button=$('check-day');
-    button.disabled=true;$('wallet-status').textContent='Checking your daily progress…';
+    button.disabled=true;$('wallet-status').textContent='Loading your progress…';
     try{
       const value=await api('player-status?'+new URLSearchParams({wallet:address}),null,15000);
       if($('wallet').value.trim()!==address)return;
       entryWallet=address;restoreHolderName(address);updateStatus(value);$('holder-daily').open=true;
-      $('wallet-status').textContent='Daily progress loaded · no run used.';$('wallet-status').className='status success';
+      $('wallet-status').textContent='Weekly progress loaded · no run used.';$('wallet-status').className='status success';
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}
   });

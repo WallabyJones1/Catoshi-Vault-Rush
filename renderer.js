@@ -5,6 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const W = 960, H = 540;
+  const INTRO_DURATION=1.25,BREACH_REMAINING=.91;
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
   const assets = {
     atmosphere: 'canyon-atmosphere.png',
@@ -36,6 +37,12 @@
   const palettes = [
     ['#302820','#241e19'], ['#292b24','#1c201b'],
     ['#302d2a','#22201e'], ['#2c2927','#201d1c']
+  ];
+  const skies=[
+    ['#15110f','#30231c','#4a3426'],
+    ['#10120f','#20251e','#33382b'],
+    ['#181614','#2d2925','#443b31'],
+    ['#0a0b10','#151722','#292525']
   ];
   function mixColor(a,b,t) {
     const av=parseInt(a.slice(1),16),bv=parseInt(b.slice(1),16);
@@ -73,6 +80,7 @@
       this.ready = false;
       this.visualPlayer = null;
       this.clock = 0;
+      this.lookAhead=0;
     }
     resize(run) {
       this.width = this.ctx.canvas?.width || W;
@@ -87,6 +95,7 @@
       this.hitObjects = [];
       this.visualPlayer = null;
       this.clock = 0;
+      this.lookAhead=0;
       this.shake = 0;
       this.intro = 0;
       const p = run.player;
@@ -126,8 +135,8 @@
       }
     }
     breakout(run) {
-      this.intro = 1.7;
-      this.camera.x -= 88;
+      this.intro = INTRO_DURATION;
+      this.camera.x -= 96;
       this.breached = false;
       const mount=this.groundPlacement(run,-108,155,0,[[-.46,.46]]);
       this.vaultY=mount.y-53-mount.burial*.5;
@@ -135,10 +144,10 @@
     breach() {
       this.breached = true;
       this.shake = .32;
-      for (let i = 0; i < 42; i++) {
-        const direction = -1.35 + Math.random() * 2.3;
-        const speed = 90 + Math.random() * 250;
-        this.particles.push({ x: -108, y: this.vaultY,
+      for (let i = 0; i < 54; i++) {
+        const direction = -1.65 + Math.random() * 1.95;
+        const speed = 130 + Math.random() * 310;
+        this.particles.push({ x: -94, y: this.vaultY,
           vx: Math.cos(direction) * speed, vy: Math.sin(direction) * speed - 70,
           life: .55 + Math.random() * .55, max: 1.1,
           color: i % 5 === 0 ? '#e8a13a' : i % 2 ? '#8d8880' : '#40382e',
@@ -146,9 +155,9 @@
       }
     }
     vault(run) {
-      const ctx = this.ctx, t = 1.7 - this.intro;
-      const charge = this.intro > 1.08;
-      const blast = Math.max(0, t - .62);
+      const ctx = this.ctx, t = INTRO_DURATION - this.intro;
+      const charge = this.intro > BREACH_REMAINING;
+      const blast = Math.max(0, t - (INTRO_DURATION-BREACH_REMAINING));
       const mount=this.groundPlacement(run,-108,155,0,[[-.46,.46]]);
       const y=mount.y,doorY=-53-mount.burial*.5;
       // The vault embeds into the real hillside across its complete base.
@@ -162,16 +171,16 @@
       }
       // A bright seam charges before the door is blown away.
       if (this.intro > 0) {
-        const glow = charge ? t / .62 : Math.max(0,1 - blast * 3);
+        const glow = charge ? t / (INTRO_DURATION-BREACH_REMAINING) : Math.max(0,1 - blast * 4);
         ctx.globalAlpha = glow * .7;
         ctx.fillStyle = '#e8a13a';ctx.fillRect(20,doorY-41,3,67);
         ctx.globalAlpha = 1;
       }
       if (!this.breached) {
         this.vaultDoor(14,doorY,0);
-      } else if (blast < 1.08 && this.intro > 0) {
-        ctx.save();ctx.translate(14-blast*190,doorY-blast*180+blast*blast*160);
-        ctx.rotate(-blast*5);this.vaultDoor(0,0,blast);ctx.restore();
+      } else if (blast < BREACH_REMAINING && this.intro > 0) {
+        ctx.save();ctx.translate(14-blast*255,doorY-blast*235+blast*blast*180);
+        ctx.rotate(-blast*7);this.vaultDoor(0,0,blast);ctx.restore();
         const radius=blast*240;
         ctx.globalAlpha=Math.max(0,.45-blast*.6);
         ctx.strokeStyle='#e8a13a';ctx.lineWidth=2;
@@ -198,6 +207,17 @@
       }
       ctx.fillStyle='#e8a13a';ctx.beginPath();ctx.arc(0,0,4,0,Math.PI*2);ctx.fill();ctx.restore();
     }
+    landingPoint(run,p) {
+      if(p.grounded)return null;
+      for(let t=.18;t<=2.7;t+=.18){
+        const x=p.x+Math.max(85,p.vx)*t,y=p.y+p.vy*t+345*t*t;
+        if(run.gapAt(x))continue;
+        let surface=run.terrain(x);
+        for(const rail of run.rails)if(x>=rail.x&&x<=rail.end){const cable=run.railY(rail,x);if(cable>p.y&&cable<surface)surface=cable;}
+        if(y>=surface)return {x,y:surface};
+      }
+      return {x:p.x+Math.max(85,p.vx)*1.1,y:run.terrain(p.x+Math.max(85,p.vx)*1.1)};
+    }
     update(run, dt, alpha=1) {
       if (!this.ready) this.reset(run);
       this.clock+=dt;
@@ -210,16 +230,23 @@
       }
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
-      const zoom = clamp(.94 - Math.max(0, p.speed - 300) * .0004 - altitude * .00013, portrait?.68:.72, .94);
-      const ease = 1 - Math.exp(-dt * 3.8);
+      const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
+      const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011;
+      const landingZoom=drop>this.height*.45?this.height*.50/(drop+70):.94;
+      const zoom = clamp(Math.min(speedZoom,landingZoom),portrait?.52:.58,.94);
+      // Reveal a deep landing promptly, then return to normal scale gradually.
+      const ease = 1 - Math.exp(-dt * (zoom<this.camera.zoom?6:2.8));
       this.camera.zoom += (zoom - this.camera.zoom) * ease;
       // Keep the hero inside the frame even on the highest balloon routes.
-      const lookDown=Math.min(altitude*.48,this.height*.24/this.camera.zoom);
-      const targetY = p.y + lookDown - this.height * (portrait?.60:.64) / this.camera.zoom;
-      this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 5));
-      const launchProgress=clamp((1.08-this.intro)/1.08,0,1);
-      const focusX=this.intro>0 ? -88+88*(1-Math.pow(1-launchProgress,2)) : p.x;
-      this.camera.x = focusX - this.width * (portrait?.24:.22) / this.camera.zoom;
+      const lookDown=Math.min(Math.max(altitude*.38,drop*.40),this.height*.32/this.camera.zoom);
+      const fallLead=p.grounded?0:clamp(p.vy*.14,0,this.height*.07/this.camera.zoom);
+      const targetY = p.y + lookDown + fallLead - this.height * (portrait?.58:.62) / this.camera.zoom;
+      this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 7));
+      const launchProgress=clamp((BREACH_REMAINING-this.intro)/BREACH_REMAINING,0,1);
+      const focusX=this.intro>0 ? -96+96*(1-Math.pow(1-launchProgress,3)) : p.x;
+      const ahead=this.intro>0?0:clamp((p.speed-250)*.10,0,this.width*.055/this.camera.zoom);
+      this.lookAhead+=(ahead-this.lookAhead)*(1-Math.exp(-dt*3));
+      this.camera.x = focusX+this.lookAhead - this.width * (portrait?.24:.22) / this.camera.zoom;
       this.landPose = Math.max(0, this.landPose - dt);
       this.impactPose=Math.max(0,this.impactPose-dt);
       this.jumpPose=Math.max(0,this.jumpPose-dt);
@@ -230,7 +257,7 @@
       this.shake = Math.max(0, this.shake - dt);
       const beforeIntro = this.intro;
       this.intro = Math.max(0, this.intro - dt);
-      if(beforeIntro > 1.08 && this.intro <= 1.08 && !this.breached)this.breach();
+      if(beforeIntro > BREACH_REMAINING && this.intro <= BREACH_REMAINING && !this.breached)this.breach();
       if (p.grounded && p.speed > 200 && !run.dead) {
         this.dust += dt;
         if (this.dust > .055) {
@@ -287,12 +314,48 @@
       for(let px=right;px>left;px-=4)ctx.lineTo(px,run.terrain(px)+3.5);
       ctx.closePath();ctx.fillStyle='rgba(10,9,8,.25)';ctx.fill();
     }
+    sky(run,transition) {
+      const ctx=this.ctx,W=this.width,H=this.height,cam=this.camera;
+      const tones=skies[transition.from].map((color,index)=>mixColor(color,skies[transition.to][index],transition.mix));
+      const gradient=ctx.createLinearGradient(0,0,0,H);
+      gradient.addColorStop(0,tones[0]);gradient.addColorStop(.52,tones[1]);gradient.addColorStop(1,tones[2]);
+      ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);
+      const night=(transition.from===3?1-transition.mix:0)+(transition.to===3?transition.mix:0);
+      const light=ctx.createRadialGradient(W*.74,H*.24,0,W*.74,H*.24,W*.70);
+      light.addColorStop(0,'rgba(232,161,58,'+(.07*(1-night))+')');light.addColorStop(1,'rgba(232,161,58,0)');
+      ctx.fillStyle=light;ctx.fillRect(0,0,W,H);
+      if(night>0){
+        ctx.fillStyle='#8d8880';
+        for(let i=0;i<32;i++){
+          const x=((run.terrainRandom(i,122949829)*W*2-cam.x*.012)%(W*2)+W*2)%(W*2)-W*.5;
+          const y=H*(.08+run.terrainRandom(i,141650939)*.37);
+          ctx.globalAlpha=night*(.10+run.terrainRandom(i,961748941)*.16);
+          ctx.beginPath();ctx.arc(x,y,i%7===0?1.2:.65,0,Math.PI*2);ctx.fill();
+        }
+        ctx.globalAlpha=night*.12;ctx.fillStyle='#f2efe9';ctx.beginPath();ctx.arc(W*.74,H*.24,Math.min(W*.023,13),0,Math.PI*2);ctx.fill();
+      }
+      for(const [biome,weight]of [[transition.from,1-transition.mix],[transition.to,transition.mix]]){
+        if(weight<=0)continue;
+        // Sparse, seamless drifting cloud bands; forest mist sits lower.
+        const period=W*1.65,shift=(cam.x*(biome===1?.026:.016)+this.clock*3)%period;
+        for(let i=0;i<4;i++){
+          const x=((i*.43*period-shift)%period+period)%period-W*.32;
+          const y=H*(biome===1?.36+i*.09:.15+i*.075);
+          const width=W*(biome===1?.60:.34),height=H*(biome===2?.012:.022);
+          ctx.globalAlpha=weight*(biome===1?.055:biome===0?.065:.04);
+          ctx.fillStyle='#8d8880';ctx.beginPath();ctx.ellipse(x,y,width,height,0,0,Math.PI*2);ctx.fill();
+          if(biome===0){ctx.beginPath();ctx.ellipse(x-width*.30,y-height*.4,width*.45,height*.85,0,0,Math.PI*2);ctx.fill();}
+        }
+      }
+      ctx.globalAlpha=1;
+    }
     background(run) {
       const ctx = this.ctx, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W,yScale=H/540;
-      ctx.fillStyle = '#171412'; ctx.fillRect(0,0,W,H);
+      const transition=run.biomeTransition(run.player.x);
+      this.sky(run,transition);
       // One stationary warm light; the actual landscape layers move independently.
-      ctx.globalAlpha = portrait?.38:.50;
+      ctx.globalAlpha = (portrait?.22:.30)*((transition.from===0?1-transition.mix:0)+(transition.to===0?transition.mix:0));
       if(portrait){
         const skyHeight=H*1.08,skyWidth=skyHeight*2172/500;
         ctx.drawImage(this.images.atmosphere,0,0,2172,500,(W-skyWidth)*.5,-H*.08,skyWidth,skyHeight);
@@ -305,9 +368,15 @@
           { speed: .045, width: 1370, base: 370, height: 330, alpha: .40 },
           { speed: .115, width: 1620, base: 452, height: 355, alpha: .66 },
           { speed: .24, width: 1810, base: 558, height: 385, alpha: .90 }
+        ] : biome===1 ? [
+          { speed:.06,width:1850,base:415,height:305,alpha:.32 },
+          { speed:.19,width:1430,base:565,height:395,alpha:.88 }
+        ] : biome===2 ? [
+          { speed:.045,width:2240,base:425,height:315,alpha:.36 },
+          { speed:.17,width:1570,base:568,height:410,alpha:.78 }
         ] : [
-          { speed: .065, width: 2110, base: 400, height: 275, alpha: .42 },
-          { speed: .18, width: 1750, base: 540, height: 320, alpha: .82 }
+          { speed:.035,width:2280,base:430,height:265,alpha:.26 },
+          { speed:.13,width:1760,base:560,height:310,alpha:.68 }
         ];
         const image=biome===0?this.images.layers:this.images.biomes;
         configs.forEach((layer,index)=>{
@@ -333,7 +402,6 @@
           }
         });
       };
-      const transition=run.biomeTransition(run.player.x);
       drawBiome(transition.from,1-transition.mix);
       drawBiome(transition.to,transition.mix);
       ctx.globalAlpha = 1;
@@ -499,12 +567,12 @@
       else if(this.landPose>0)frame=6;
       else if(!p.grounded)frame=p.held && p.heldTime>.14 ? 2 : p.vy<0 ? 4 : 5;
       else frame=p.rail?3:p.speed>430?(Math.sin(run.time*7)>.82?0:1):(Math.sin(run.time*4)>.90?1:0);
-      const launch = clamp((1.08-this.intro)/1.08,0,1);
-      const progress = 1-Math.pow(1-launch,2);
-      const actorX=this.intro>0 ? -88+88*progress : p.x;
-      const actorY=this.intro>0 ? run.terrain(actorX)-Math.sin(launch*Math.PI)*42 : p.y;
-      if(this.intro>1.08)frame=1;
-      else if(this.intro>.4)frame=4;
+      const launch = clamp((BREACH_REMAINING-this.intro)/BREACH_REMAINING,0,1);
+      const progress = 1-Math.pow(1-launch,3);
+      const actorX=this.intro>0 ? -96+96*progress : p.x;
+      const actorY=this.intro>0 ? run.terrain(actorX)-Math.sin(launch*Math.PI)*58 : p.y;
+      if(this.intro>BREACH_REMAINING)frame=1;
+      else if(this.intro>.30)frame=4;
       else if(this.intro>0)frame=6;
       const crash=this.crashPose,age=crash?Math.min(.75,crash.age):0;
       const crashTravel=crash?Math.min(24,crash.speed*.06)*Math.sin(age*Math.PI/.75):0;
@@ -518,6 +586,7 @@
       ctx.save();ctx.translate(actorX+crashTravel,actorY-1+(crash?.reason==='MISSED THE GAP'?age*age*140:-(crash?Math.sin(age*Math.PI/.75)*16:0)));
       ctx.rotate(crash?crash.angle-Math.min(age/.62,1)*Math.PI*.65:this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
       if(crash)frame=7;
+      else if(this.intro>BREACH_REMAINING){const charge=(INTRO_DURATION-this.intro)/(INTRO_DURATION-BREACH_REMAINING);ctx.scale(1+charge*.06,1-charge*.12);}
       else if(this.impactPose>0){ctx.rotate(Math.sin(this.impactPose*32)*this.impactPose*.22);ctx.scale(1.06,.94);}
       else if(this.jumpPose>0){ctx.scale(.97,1.05);frame=4;}
       if(this.flipPulse>0){
@@ -527,10 +596,10 @@
       if(p.rush<=0&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
       this.sprite(this.images.characters,characters[frame],0,0,portrait?60:40,false);
       ctx.restore();ctx.restore();ctx.globalAlpha=1;
-      if(this.intro>0 && this.intro<=1.08 && this.intro>.96){
-        ctx.fillStyle='rgba(242,239,233,'+((this.intro-.96)/.12*.16)+')';ctx.fillRect(0,0,W,H);
+      if(this.intro>0 && this.intro<=BREACH_REMAINING && this.intro>BREACH_REMAINING-.09){
+        ctx.fillStyle='rgba(242,239,233,'+((this.intro-(BREACH_REMAINING-.09))/.09*.07)+')';ctx.fillRect(0,0,W,H);
       }
     }
   }
-  return { Renderer, loadAssets, assets, characters, props, strips, biomeStrips, obstacles, W, H };
+  return { Renderer, loadAssets, assets, characters, props, strips, biomeStrips, obstacles, W, H, INTRO_DURATION, BREACH_REMAINING };
 });

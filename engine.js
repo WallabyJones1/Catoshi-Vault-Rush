@@ -31,9 +31,9 @@
         shortHeight: 62 + this.random() * 18,
         shortPhase: .14 + this.random() * .24
       };
-      this.biomeSpan=4700+this.terrainRandom(0,982451653)*1100;
-      const routes=[1,2,3].sort((a,b)=>this.terrainRandom(a,433494437)-this.terrainRandom(b,433494437));
-      this.biomes=[0,...routes];
+      this.terrainSections=[];
+      this.terrainCursor=1800;
+      this.terrainDrop=0;
       this.lastPattern = -1;
       this.items = [];
       this.rails = [];
@@ -83,15 +83,39 @@
       const a = this.terrainRandom(cell, salt), b = this.terrainRandom(cell + 1, salt);
       return (a + (b - a) * t) * 2 - 1;
     }
-    region(x) {
-      const cell = Math.floor((x - 1800) / 4200);
-      const mode = Math.floor(this.terrainRandom(cell, 7919) * 6);
-      return ['ROLLING DUNES', 'GIANT DUNE', 'DEEP VALLEY', 'RUSH DESCENT', 'RIDGELINE', 'SALT FLATS'][mode];
+    sectionAt(x) {
+      if(x<1800)return null;
+      // Shuffled shape groups and variable lengths give each seed a different
+      // route. This cache uses coordinate RNG only, never the item generator.
+      while(this.terrainCursor<=x){
+        const index=this.terrainSections.length,group=Math.floor(index/6);
+        const order=[0,1,2,3,4,5].sort((a,b)=>this.terrainRandom(group,433494437+a*7919)-this.terrainRandom(group,433494437+b*7919));
+        if(index%6===0&&index&&order[0]===this.terrainSections[index-1].kind)[order[0],order[1]]=[order[1],order[0]];
+        // Preserve the swapped group order for its remaining five sections.
+        const prior=this.terrainSections[index-index%6];
+        const kind=(prior?.order||order)[index%6];
+        const length=3400+this.terrainRandom(index,15485863)*2100;
+        const height=420+this.terrainRandom(index,32452843)*380;
+        const peak=kind===1?.60+this.terrainRandom(index,104729)*.09:kind===2?.32+this.terrainRandom(index,104729)*.11:.45;
+        const drop=kind===3?700+this.terrainRandom(index,67867967)*420:0;
+        this.terrainSections.push({index,kind,order:index%6===0?order:null,start:this.terrainCursor,end:this.terrainCursor+length,length,height,peak,
+          drop,dropBefore:this.terrainDrop,biome:kind===2?1:kind===1||kind===4?2:kind===5?3:0,
+          lift:kind===1?1.25+this.terrainRandom(index,982451653)*.10:1});
+        this.terrainCursor+=length;this.terrainDrop+=drop;
+      }
+      let low=0,high=this.terrainSections.length-1;
+      while(low<high){const mid=(low+high)>>1;if(x>=this.terrainSections[mid].end)low=mid+1;else high=mid;}
+      return this.terrainSections[low];
     }
-    biome(x) { return this.biomes[Math.floor(Math.max(0,x)/this.biomeSpan)%this.biomes.length]; }
+    region(x) {
+      return ['ROLLING DUNES','GIANT DUNE','DEEP VALLEY','RUSH DESCENT','RIDGELINE','SALT FLATS'][this.sectionAt(x)?.kind??0];
+    }
+    biome(x) {return this.sectionAt(x)?.biome??0;}
     biomeTransition(x) {
-      const section=Math.floor(Math.max(0,x)/this.biomeSpan),t=Math.max(0,x)/this.biomeSpan-section;
-      return {from:this.biomes[section%4],to:this.biomes[(section+1)%4],mix:this.smooth(clamp((t-.83)/.17,0,1))};
+      const section=this.sectionAt(x);
+      if(!section)return {from:0,to:0,mix:0};
+      const t=(x-section.start)/section.length;
+      return {from:section.biome,to:this.sectionAt(section.end+1).biome,mix:this.smooth(clamp((t-.84)/.16,0,1))};
     }
     baseTerrain(x) {
       const t = this.profile;
@@ -100,32 +124,27 @@
       // A broad, safe entry slope blends into non-repeating terrain after 120m.
       const blend = this.smooth(clamp((x - 1200) / 1500, 0, 1));
       let varied = this.noise(x, 2100, 173) * 185 + this.noise(x, 760, 947) * 48;
-      const cell = Math.floor((x - 1800) / 4200);
-      for (let i = cell - 1; i <= cell + 1; i++) {
-        const mode = Math.floor(this.terrainRandom(i, 7919) * 6);
-        const center = 1800 + i * 4200 + 1300 + this.terrainRandom(i, 104729) * 1500;
-        const radius = 1250 + this.terrainRandom(i, 15485863) * 550;
-        const u = (x - center) / radius;
-        if (Math.abs(u) >= 1) continue;
-        // Compact C2 bumps: no seams, cliffs or sudden changes in slope.
-        const envelope = Math.pow(1 - u * u, 3);
-        const height = 420 + this.terrainRandom(i, 32452843) * 380;
-        if (mode === 1) varied -= height * envelope;
-        else if (mode === 2) varied += height * envelope;
-        else if (mode === 3) varied += height * u * envelope;
-        else if (mode === 4) varied -= 210 * envelope * Math.cos(u * Math.PI * 2);
-        else if (mode === 0) varied += 145 * envelope * Math.sin(u * Math.PI * 3);
+      const section=this.sectionAt(x);
+      if(section){
+        const u=clamp((x-section.start)/section.length,0,1),envelope=Math.sin(u*Math.PI)**4;
+        const bump=u<=section.peak?this.smooth(u/section.peak):1-this.smooth((u-section.peak)/(1-section.peak));
+        varied+=section.dropBefore;
+        if(section.kind===1)varied-=section.height*section.lift*bump;
+        else if(section.kind===2)varied+=section.height*1.10*bump;
+        else if(section.kind===3){
+          // A sustained descent gains elevation loss without a forced climb
+          // at its exit. Both ends retain continuous height, slope and curvature.
+          varied+=section.drop*this.smooth(clamp((u-.16)/.68,0,1));
+          varied-=170*envelope*Math.sin(u*Math.PI*2);
+        }else if(section.kind===4)varied-=section.height*.34*envelope*Math.cos(u*Math.PI*4);
+        else if(section.kind===0)varied+=155*envelope*Math.sin(u*Math.PI*4);
       }
       let ground = 230 + x * t.grade + opening * (1 - blend) + varied * blend;
-      for (let i = Math.max(0, cell - 1); i <= cell + 1; i++) {
-        if (Math.floor(this.terrainRandom(i, 7919) * 6) !== 5) continue;
-        const center = 1800 + i * 4200 + 1300 + this.terrainRandom(i, 104729) * 1500;
-        const half = 450 + this.terrainRandom(i, 49979687) * 200;
-        const edge = 650, distance = Math.abs(x - center);
-        if (distance >= half + edge) continue;
-        const weight = (distance <= half ? 1 : 1 - this.smooth((distance - half) / edge)) * blend;
-        const tilt = .02 + this.terrainRandom(i, 67867967) * .04;
-        const flat = 230 + center * t.grade + this.noise(center, 2100, 173) * 110 + (x - center) * tilt;
+      if(section?.kind===5){
+        const u=(x-section.start)/section.length,center=(section.start+section.end)*.5;
+        const weight=this.smooth(clamp((u-.12)/.22,0,1))*(1-this.smooth(clamp((u-.66)/.22,0,1)))*blend;
+        const tilt=.025+this.terrainRandom(section.index,49979687)*.025;
+        const flat=230+center*t.grade+section.dropBefore+this.noise(center,2100,173)*110+(x-center)*tilt;
         ground += (flat - ground) * weight;
       }
       return ground;
@@ -452,13 +471,13 @@
       item.hit = true;
       if (p.invulnerable > 0 || p.rush > 0) return;
       const heavy=Boolean(item.heavy||item.hazard),before=p.speed;
-      p.speed=Math.min(before,clamp(before*(heavy?.32:.60),heavy?90:120,heavy?150:240));
+      p.speed=Math.min(before,clamp(before*(heavy?.58:.72),200,heavy?520:600));
       p.vx*=p.speed/Math.max(1,before);
       if(!p.grounded)p.vy*=.8;
       p.boost=0;
       p.invulnerable=1.25;
-      p.stagger=heavy?.65:.38;
-      p.recovery=heavy?2:1.2;
+      p.stagger=heavy?.42:.28;
+      p.recovery=heavy?1.5:1.1;
       p.spin=0;p.turns=0;
       // Preserve the slowdown without allowing the same collision to cause
       // a lethal landing or an immediate catch by an already nearby hound.
@@ -511,9 +530,9 @@
       const previousX = p.x, previousY = p.y;
       if (p.grounded) {
         let angle = p.rail ? this.railSlope(p.rail, p.x) : p.ramp ? this.rampSlope(p.ramp, p.x) : this.slope(p.x);
-        const acceleration = 620 * Math.sin(angle) * 0.45 + 24 - p.speed * 0.06 + (p.boost > 0 ? 75 : 0);
+        const acceleration = 620 * Math.sin(angle) * 0.45 + 24 - p.speed * 0.06 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?105:0);
         const maximum=p.rush>0?1080:Math.max(760,p.speed-360*dt);
-        p.speed = clamp(p.speed + acceleration * dt, p.rush>0?850:p.stagger > 0 || angle >= -.08 ? 75 : 175, maximum);
+        p.speed = clamp(p.speed + acceleration * dt, p.rush>0?850:p.stagger>0?160:angle>=-.08?75:200, maximum);
         p.vx = p.speed * Math.cos(angle);
         p.vy = p.speed * Math.sin(angle);
         p.x += p.vx * dt;
@@ -642,5 +661,5 @@
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-10' };
+  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-11' };
 });

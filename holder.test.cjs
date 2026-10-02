@@ -6,6 +6,7 @@ const {DatabaseSync}=require('node:sqlite');
 const {Run}=require('./engine.js');
 const {createApp,openDatabase,configFromEnv,ROUND_MS,GRACE_MS}=require('./server.cjs');
 const {ENGINE_VERSION,MINT,MAX_TICKS}=require('./security.cjs');
+const {DAY_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const WALLET='11111111111111111111111111111111';
 function simulate(seed){
   const run=new Run(seed);run.press();let ticks=0;
@@ -40,7 +41,7 @@ async function harness(t,{durable=false,balance}={}){
   return h;
 }
 
-test('free wallet entry has no daily or hourly quota, survives restarts and resets only progress at UTC midnight',async t=>{
+test('free wallet entry has no quota, survives restarts and resets weekly progress on Monday UTC',async t=>{
   let calls=0;const h=await harness(t,{durable:true,balance:async()=>{calls++;throw Error('RPC offline');}});
   const rules=(await h.request('/api/config')).value;assert.equal(rules.holderDailyRuns,null);assert.equal(rules.minimumTokens,0);assert(rules.unlimitedPlays);assert(!('shareBonus' in rules));
   for(let i=0;i<151;i++){
@@ -51,9 +52,9 @@ test('free wallet entry has no daily or hourly quota, survives restarts and rese
   const status=(await h.request('/api/player-status?wallet='+WALLET)).value;assert(status.eligible);assert.equal(status.quota.used,151);assert.equal(status.history.length,10,'recent history is a window, not a run cap');
   await h.restart();assert.equal((await h.start()).status,200,'existing counters do not restrict a fresh session');
   assert.equal((await h.request('/api/player-status?wallet='+WALLET)).value.quota.used,152);assert.equal(calls,0,'no token RPC for entry');
-  const oldRound=Math.floor(h.clock/ROUND_MS);h.clock=(oldRound+1)*ROUND_MS+1;
+  const oldRound=currentRound(h.clock);h.clock=roundWindow(oldRound).end+1;
   const next=await h.start();assert.equal(next.status,200);assert.equal(next.value.quota.used,1);assert.equal(next.value.quota.remaining,null);
-  assert.equal(next.value.quota.resetsAt,(oldRound+2)*ROUND_MS);
+  assert.equal(next.value.quota.resetsAt,roundWindow(oldRound+1).end);assert.equal(next.value.round,oldRound+1);
 });
 
 test('concurrent free starts accept zero holdings and unavailable RPCs; addresses still validate',async t=>{
@@ -66,6 +67,52 @@ test('concurrent free starts accept zero holdings and unavailable RPCs; addresse
   assert.equal(h.app.db.prepare('SELECT used FROM holder_attempts WHERE wallet=?').get(WALLET).used,12);
   assert.equal(h.app.db.prepare('SELECT COUNT(*) count FROM runs WHERE wallet=?').get(WALLET).count,12);assert.equal(calls,0);
   assert.equal((await h.request('/api/entry',{wallet:'invalid'})).status,400);
+});
+
+test('guest identity renews the same old cookie and keeps weekly best scores across several days',async t=>{
+ const h=await harness(t),ticket=(await h.start('holder',null,'Guest Cat')).value,result=await h.finish(ticket);
+ const cookie=h.cookies.get('main'),session=h.app.db.prepare('SELECT * FROM sessions').get();
+ h.app.db.prepare('UPDATE sessions SET expires=? WHERE id=?').run(h.clock+1000,session.id);
+ const renewed=(await h.request('/api/player-status')).value;
+ assert.equal(h.cookies.get('main'),cookie);assert.equal(renewed.best.id,result.run.id);
+ assert(h.app.db.prepare('SELECT expires FROM sessions WHERE id=?').get(session.id).expires>=h.clock+29*DAY_MS);
+ h.clock+=2*DAY_MS;
+ const later=(await h.request('/api/player-status')).value;
+ assert.equal(later.round,ticket.round);assert.equal(later.best.id,result.run.id);assert.equal(later.quota.used,1);
+});
+
+test('a run finishing just after Monday stays on the previous weekly board during submission grace',async t=>{
+ const h=await harness(t),week=currentRound(h.clock),window=roundWindow(week);
+ h.clock=window.end-1000;
+ const ticket=(await h.start()).value;assert.equal(ticket.round,week);
+ const result=await h.finish(ticket);assert(h.clock>window.end);
+ assert.equal(result.run.round,week);assert.equal(result.progress.round,week+1);assert.equal(result.progress.best,null);
+ assert.equal(result.quest.day,dayAt(window.end-1));assert.equal(result.progress.quota.used,0);
+ assert.equal((await h.request('/api/leaderboard')).value.entries.length,0);
+ const previous=(await h.request('/api/leaderboard?round='+week)).value;
+ assert.equal(previous.entries[0].id,result.run.id);assert.equal(previous.roundEnds,window.end);assert.equal(previous.period,'weekly');
+});
+
+test('weekly prize snapshots preserve legacy rounds, use unchanged budgets and close after the Monday grace period',async t=>{
+ const {ensureRound,makeTop10Plan}=require('./rewards.cjs');
+ const {encode58}=(()=>{
+  const alphabet='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+  return {encode58:buffer=>{let value=BigInt('0x'+buffer.toString('hex')),s='';while(value){s=alphabet[Number(value%58n)]+s;value/=58n;}return s;}};
+ })();
+ const vault=encode58(Buffer.alloc(32,44)),rush=encode58(Buffer.alloc(32,45)),config=configFromEnv({VAULT_WALLET:vault,RUSH_MINT:rush,REWARDS_ENABLED:'true',CATOSHI_WEEKLY_PRIZE_POOL:'100000',RUSH_WEEKLY_PRIZE_POOL:'10'});
+ const h=await harness(t),week=currentRound(h.clock),window=roundWindow(week),db=h.app.db;
+ db.prepare('INSERT INTO rounds VALUES(?,?,?,?,?)').run(20500,20500*DAY_MS,20501*DAY_MS,'500000',vault);
+ const legacyBefore={...db.prepare('SELECT * FROM rounds WHERE id=20500').get()};
+ const snapshot=ensureRound(db,week,config);assert.equal(snapshot.start,window.start);assert.equal(snapshot.end,window.end);assert.equal(snapshot.tokens,'100000');
+ config.tokens='200000';config.rewards.rushTokens='20';assert.equal(ensureRound(db,week,config).tokens,'100000');
+ assert.equal(ensureRound(db,week+1,config).tokens,'200000');assert.deepEqual({...db.prepare('SELECT * FROM rounds WHERE id=20500').get()},legacyBefore);
+ const ticket=(await h.start('holder',WALLET,'Winner')).value;await h.finish(ticket);
+ const balance=async()=>({raw:1000000000000n,decimals:6});
+ await assert.rejects(makeTop10Plan(db,week,config,{now:()=>window.end+GRACE_MS-1,balance}),/submission window/);
+ const plan=await makeTop10Plan(db,week,config,{now:()=>window.end+GRACE_MS,balance});
+ assert.equal(plan.payments.length,2);assert(plan.payments.every(p=>p.wallet===WALLET));
+ assert.equal(plan.payments.find(p=>p.symbol==='CATOSHI').raw,'100000000000');assert.equal(plan.payments.find(p=>p.symbol==='RUSH').raw,'10000000');
+ const again=await makeTop10Plan(db,week,config,{now:()=>window.end+GRACE_MS+1000,balance});assert.deepEqual(again,plan);
 });
 
 test('existing SQLite data migrates without losing scores or available attempt counts',()=>{
@@ -94,16 +141,16 @@ test('leaderboard publishes one best completed run per holder wallet, preserving
 });
 
 
-test('completed native red pickups accumulate once across ten runs, unlock the best score and reset with daily history',async t=>{
+test('native red pickups unlock a daily boost that survives midnight on the weekly board, then resets on Monday',async t=>{
  const h=await harness(t,{durable:true});
- // A completed native v10 run earns both pickups before its third obstacle hit.
- const inputs=[[709,1],[709,0],[1662,1],[1662,0],[1972,1],[1972,0]];
- const run=new Run(1);let ticks=0,cursor=0;
+ // A completed native v11 recording earns both pickups before its third hit.
+ const inputs=[[663,1],[663,0],[1193,1],[1193,0],[1375,1],[1375,0],[2024,1],[2024,0],[2770,1],[2770,0],[3455,1],[3455,0],[3866,1],[3866,0]];
+ const run=new Run(2);let ticks=0,cursor=0;
  while(!run.dead&&ticks<MAX_TICKS){while(cursor<inputs.length&&inputs[cursor][0]===ticks){inputs[cursor++][1]?run.press():run.release();}run.step(1/120);run.drainEvents();ticks++;}
  assert.equal(run.redTokens,1);assert.equal(run.rushPickups,1);assert(run.dead);const rawScore=Math.floor(run.score),results=[];
  for(let i=0;i<10;i++){
   const start=(await h.start('holder',WALLET,'Quest Cat '+i)).value;
-  h.app.db.prepare('UPDATE runs SET seed=1 WHERE id=?').run(start.id);
+  h.app.db.prepare('UPDATE runs SET seed=2 WHERE id=?').run(start.id);
   h.clock+=ticks/120*1000+2000;
   const request={id:start.id,ticks,inputs,score:99999999,redTokens:5,rushPickups:999,pointsMultiplier:99};
   const response=await h.request('/api/runs/finish',request);assert.equal(response.status,200);const value=response.value;results.push(value);
@@ -117,7 +164,11 @@ test('completed native red pickups accumulate once across ten runs, unlock the b
  assert.equal(status.history.filter(r=>r.pointsMultiplier===2).length,1);assert(status.history.every(r=>r.status==='completed'));
  assert(!JSON.stringify(status).includes('inputs'),'history never exposes recordings');
  await h.restart();assert.equal((await h.request('/api/holder-status?wallet='+WALLET)).value.quest.collected,10);
- h.clock=(Math.floor(h.clock/ROUND_MS)+1)*ROUND_MS+1;
+ const week=currentRound(h.clock);h.clock=(dayAt(h.clock)+1)*DAY_MS+1;
+ const tomorrow=(await h.request('/api/holder-status?wallet='+WALLET)).value;
+ assert.equal(tomorrow.round,week);assert.equal(tomorrow.quest.collected,0);assert.equal(tomorrow.quota.used,10);
+ assert.equal(tomorrow.history.length,10);assert.equal(tomorrow.best.score,rawScore*2,'earned daily boosts remain on the weekly board');
+ h.clock=roundWindow(week).end+1;
  const reset=(await h.request('/api/holder-status?wallet='+WALLET)).value;assert.equal(reset.quest.collected,0);assert.equal(reset.quota.remaining,null);assert.equal(reset.history.length,0);assert.equal(reset.best,null);
 });
 
@@ -135,7 +186,7 @@ test('daily progress loads without spending a run and renders history, quest and
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{document,window,location:{protocol:'file:'},localStorage:{getItem(){return null;},setItem(){}},fetch:async route=>{requests.push(route);return {ok:true,json:async()=>({...status,eligible:true,tokens:'50000'})};},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},URLSearchParams,console});
  await get('check-day').listeners.click();
  assert.deepEqual(requests,['/api/player-status?wallet='+WALLET]);assert.equal(window.RushOnline.wallet(),WALLET);
- assert.equal(get('holder-runs').textContent,'4 RUNS TODAY');assert.equal(get('holder-daily').open,true);assert.equal(get('again').disabled,false);
+ assert.equal(get('holder-runs').textContent,'4 RUNS THIS WEEK');assert.equal(get('holder-daily').open,true);assert.equal(get('again').disabled,false);
  assert.equal(get('quest-count').textContent,'10 / 10 · 2×');assert.equal(get('quest-progress').value,10);assert.equal(get('holder-daily').hidden,false);
  assert.equal(get('daily-history').children.length,2);assert.match(get('holder-best').textContent,/2× QUEST/);
  assert.match(get('daily-history').children[0].children[1].textContent,/<Cat> · 1000m · 2 red/,'names are rendered literally, never as HTML');

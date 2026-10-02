@@ -9,6 +9,7 @@ const vm=require('node:vm');
 const {Run,TAU}=require('./engine.js');
 const security=require('./security.cjs');
 const {createApp,openDatabase,configFromEnv,ROUND_MS,GRACE_MS}=require('./server.cjs');
+const {currentRound,roundWindow}=require('./periods.cjs');
 const {makePlan,recordPayment}=require('./admin.cjs');
 function encode58(bytes){let n=BigInt('0x'+bytes.toString('hex')),value='';while(n){value='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'[Number(n%58n)]+value;n/=58n;}for(const b of bytes){if(b!==0)break;value='1'+value;}return value;}
 function simulate(seed){const run=new Run(seed);run.press();let ticks=0;while(!run.dead&&ticks<security.MAX_TICKS){run.step(1/120);run.drainEvents();ticks++;}if(!run.dead)run.crash('TIME LIMIT');return {run,ticks,inputs:[[0,1]]};}
@@ -73,7 +74,7 @@ test('production configuration fails closed without HTTPS or durable storage',()
   assert.throws(()=>configFromEnv({PRIZES_ENABLED:'true'}),/vault/);
   assert.throws(()=>security.playerName('<script>alert(1)</script>'),/character name/);
   assert.equal(security.playerName('  Cat   Runner  '),'Cat Runner');
-  assert.equal(ROUND_MS,86400000);
+  assert.equal(ROUND_MS,7*86400000);
 });
 test('Ed25519 wallet ownership and exact token balance threshold',async()=>{
   const keys=crypto.generateKeyPairSync('ed25519'),wallet=encode58(keys.publicKey.export({type:'spki',format:'der'}).subarray(-32));
@@ -197,7 +198,7 @@ test('one Play button, touch/keyboard, pause/resume, failed server start and vau
   await window.dispatch('keydown',{code:'Space'});assert(createdRun.player.held);await window.dispatch('keyup',{code:'Space'});assert(!createdRun.player.held);
   await elements['pause-menu'].dispatch('click');startsFail=true;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/offline/);assert(!elements['verify-button'].disabled,'failed start allows retry');
   let selected;elements.wallet.value=security.MINT;ticket.wallet=security.MINT;window.RushOnline.prepare=async()=>ticket;window.RushOnline.setWallet=address=>{selected=address;};
-  await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'DAILY RUN');
+  await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'WEEKLY RUN');
   await elements['pause-menu'].dispatch('click');
   await elements['wallet-form'].dispatch('submit');assert(frame);
 });
@@ -299,7 +300,7 @@ test('unattended runs lose momentum and usually fail; timed taps avoid early obs
     const idle=new Run(seed);let idleHits=0;
     for(let tick=0;tick<120*90&&!idle.dead;tick++){idle.step(1/120);idleHits+=idle.drainEvents().filter(event=>event.type==='stumble').length;}
     failed+=idle.dead;bumped+=idleHits>0;assert(idle.time>4,'the introduction stays safe');
-    const route=new Run(seed);route.generate(40000);routes.add(route.biomes.join(','));
+    const route=new Run(seed);route.generate(40000);route.sectionAt(40000);routes.add(route.terrainSections.map(s=>s.kind+':'+Math.round(s.length)+':'+s.biome).join(','));
     for(const item of route.items)if(item.hazard)hazards.add(item.type);
     let cleared=false;
     for(const distance of [100,150,200,250,300,350,400,450,500,550,600]){
@@ -317,7 +318,7 @@ test('unattended runs lose momentum and usually fail; timed taps avoid early obs
   assert(failed>=225,'at least 75% of sampled idle routes fail within 90 seconds while allowing collision recovery');
   assert(bumped>=294,'idle play should reliably cost momentum');
   assert(clearable>=294,'timed taps should clear early hazards in at least 98% of sampled routes; crest landings also require control');
-  assert.equal(routes.size,6,'all orders of the three extra biomes occur');
+  assert(routes.size>=290,'seeded terrain shapes, lengths and biome sequences differ across rounds');
   assert.deepEqual([...hazards].sort(),['barrier','cart','log','rock','spikes','stack']);
 });
 
@@ -359,7 +360,7 @@ test('large obstacles slow the rider, consume collisions once and allow clean ju
     const idle=setup();idle.items[0].type=kind;idle.combo=5;let impact;
     for(let tick=0;tick<120&&!impact;tick++){idle.step(1/120);impact=idle.drainEvents().find(event=>event.type==='stumble');}
     assert(impact&&impact.heavy);assert(!idle.dead);assert.equal(idle.combo,1);
-    assert(idle.player.speed>=90&&idle.player.speed<=150);assert(impact.loss>240);
+    assert(idle.player.speed>=200&&idle.player.speed<300);assert(impact.loss>140,'big objects remove noticeable momentum without stopping the rider');
     advance(idle,90);assert(!idle.dead,'an obstacle impact does not end the run');
     assert(!idle.drainEvents().some(event=>event.type==='stumble'),'do not hit the same object twice');
   }
@@ -451,6 +452,25 @@ test('high-jump cameras keep Catoshi in frame and play-area CSS suppresses iPhon
   assert.match(css,/#game-screen,#game-screen \*\{[^}]*-webkit-user-select:none;user-select:none;[^}]*-webkit-touch-callout:none;[^}]*-webkit-tap-highlight-color:transparent/);
 });
 
+test('mobile camera reveals the descending landing on a recorded high balloon route while keeping the hero clear',()=>{
+  const {Renderer}=require('./renderer.js');
+  const inputs=[[663,1],[663,0],[1193,1],[1193,0],[1375,1],[1375,0],[2024,1],[2024,0],[2770,1],[2770,0],[3455,1],[3455,0],[3866,1],[3866,0]];
+  const run=new Run(2),width=600,height=960,renderer=new Renderer({canvas:{width,height}},{});renderer.reset(run);
+  let cursor=0,samples=0,lowestLanding=0;
+  for(let tick=0;tick<120*65&&!run.dead;tick++){
+    while(cursor<inputs.length&&inputs[cursor][0]===tick){inputs[cursor++][1]?run.press():run.release();}
+    run.step(1/120);run.drainEvents();renderer.update(run,1/120);
+    const heroY=(run.player.y-renderer.camera.y)*renderer.camera.zoom;
+    assert(heroY>height*.20&&heroY<height*.76,'Catoshi stays away from the HUD and bottom controls');
+    if(run.player.grounded||run.player.vy<=0||run.terrain(run.player.x)-run.player.y<150)continue;
+    const landing=renderer.landingPoint(run,run.player),x=(landing.x-renderer.camera.x)*renderer.camera.zoom;
+    if(x<0||x>width-20)continue;
+    samples++;lowestLanding=Math.max(lowestLanding,(landing.y-renderer.camera.y)*renderer.camera.zoom);
+  }
+  assert(samples>100,'the recording actually exercises a large descending jump');
+  assert(lowestLanding<height,'the approaching landing fits inside the mobile play area');
+});
+
 test('midair flip sounds emit once per turn and mistimed flips spend one life without banking bonuses',()=>{
   const run=new Run(5);run.items=[];run.nextFeature=run.nextScenery=Infinity;run.gaps=[];run.rails=[];run.ramps=[];
   run.terrain=()=>5000;run.derivative=()=>0;run.slope=()=>0;
@@ -496,7 +516,7 @@ test('landing on a tall obstacle cannot bypass the nonfatal collision response o
   const run=recoveryRun();run.items=[{type:kind,x:104,y:200,width:74,height:70,heavy:true,hazard:true}];
   run.dog={active:true,distance:24.1,warning:true};run.step(1/120);
   assert(!run.dead,kind+' collision and landing must survive');advance(run,1);assert(run.player.grounded);
-  assert(run.player.recovery>1.9);assert(run.dog.distance>=180);assert(!run.dog.warning);
+  assert(run.player.recovery>1.4);assert(run.dog.distance>=180);assert(!run.dog.warning);
   assert.equal(run.drainEvents().filter(event=>event.type==='stumble').length,1);
   advance(run,240);assert(!run.dead,'recovery keeps the run alive');assert(run.player.recovery===0);
  }
@@ -853,7 +873,7 @@ test('wallet-free scored runs keep private browser progress and never accept a p
  const board=(await request('/api/leaderboard')).value;assert.equal(board.entries.length,2,'only the best guest run per browser is shown');
  assert(board.entries.every(run=>run.wallet===null&&!Object.hasOwn(run,'session')));assert.equal(rpcCalls,0);
  assert.equal((await request('/api/runs/finish',{id:firstResult.run.id})).value.duplicate,true);
- clock=(Math.floor(clock/ROUND_MS)+1)*ROUND_MS+1;const reset=(await request('/api/player-status')).value;
+ clock=roundWindow(currentRound(clock)).end+1;const reset=(await request('/api/player-status')).value;
  assert.equal(reset.quota.used,0);assert.equal(reset.quest.collected,0);assert.equal(reset.best,null);
 });
 

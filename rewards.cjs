@@ -1,6 +1,7 @@
 'use strict';
 const crypto=require('node:crypto');
 const {MINT,walletAddress,tokenBalance,rpc,decode58}=require('./security.cjs');
+const {DAY_MS,WEEK_ID_OFFSET,roundWindow}=require('./periods.cjs');
 const DEFAULT_SPLIT=[30,20,12,10,8,6,5,4,3,2];
 const positive=value=>!/^0(?:\.0+)?$/.test(value);
 function amount(value,label){
@@ -12,8 +13,8 @@ function rewardSettings(env){
   const enabled=(env.REWARDS_ENABLED??env.PRIZES_ENABLED)==='true';
   const vault=(env.VAULT_WALLET||'').trim();if(vault)walletAddress(vault);
   const rushMint=(env.RUSH_MINT||'').trim();if(rushMint){walletAddress(rushMint);if(rushMint===MINT)throw Error('RUSH_MINT must be the RUSH token mint, not the CATOSHI mint.');}
-  const catoshiPool=amount(env.CATOSHI_PRIZE_POOL??env.JACKPOT_TOKENS_PER_ROUND??'100000','CATOSHI_PRIZE_POOL');
-  const rushPool=amount(env.RUSH_PRIZE_POOL??'0','RUSH_PRIZE_POOL');
+  const catoshiPool=amount(env.CATOSHI_WEEKLY_PRIZE_POOL??env.CATOSHI_PRIZE_POOL??env.JACKPOT_TOKENS_PER_ROUND??'100000','CATOSHI_PRIZE_POOL');
+  const rushPool=amount(env.RUSH_WEEKLY_PRIZE_POOL??env.RUSH_PRIZE_POOL??'0','RUSH_PRIZE_POOL');
   const splits=env.REWARD_SPLIT?env.REWARD_SPLIT.split(',').map(Number):DEFAULT_SPLIT.slice();
   if(splits.length!==10||splits.some(n=>!Number.isInteger(n)||n<1)||splits.reduce((a,b)=>a+b,0)!==100)throw Error('REWARD_SPLIT needs ten positive integer percentages totaling 100.');
   if(enabled&&!vault)throw Error('Rewards require a vault public wallet in VAULT_WALLET.');
@@ -21,13 +22,14 @@ function rewardSettings(env){
   if(enabled&&positive(rushPool)&&!rushMint)throw Error('Set RUSH_MINT before enabling a RUSH prize pool.');
   return {enabled,vault,rushMint,catoshiPool,rushPool,splits,tokens:enabled?catoshiPool:'0',rushTokens:enabled?rushPool:'0'};
 }
-function ensureRound(db,id,config,roundMs){
+function ensureRound(db,id,config,roundMs=DAY_MS){
   const settings=config.rewards||{rushMint:'',rushTokens:'0',splits:DEFAULT_SPLIT};
-  db.prepare('INSERT OR IGNORE INTO rounds(id,start,end,tokens,vault)VALUES(?,?,?,?,?)').run(id,id*roundMs,(id+1)*roundMs,config.tokens,config.vault);
+  const window=id>=WEEK_ID_OFFSET?roundWindow(id):{start:id*roundMs,end:(id+1)*roundMs};
+  db.prepare('INSERT OR IGNORE INTO rounds(id,start,end,tokens,vault)VALUES(?,?,?,?,?)').run(id,window.start,window.end,config.tokens,config.vault);
   db.prepare('INSERT OR IGNORE INTO round_rewards(round,rush_mint,rush_tokens,splits)VALUES(?,?,?,?)').run(id,settings.rushMint,settings.rushTokens,JSON.stringify(settings.splits));
   let row=db.prepare('SELECT r.*,rr.rush_mint,rr.rush_tokens,rr.splits FROM rounds r JOIN round_rewards rr ON rr.round=r.id WHERE r.id=?').get(id);
-  // Turning rewards on upgrades an unfunded current day. Announced funded pools
-  // remain fixed for that UTC day, and cannot overwrite an existing payout plan.
+  // Turning rewards on upgrades an unfunded round. Announced funded pools
+  // remain fixed for that period, and cannot overwrite an existing payout plan.
   const planned=db.prepare('SELECT round FROM reward_plans WHERE round=? UNION SELECT round FROM payouts WHERE round=?').get(id,id);
   if(!planned&&!positive(row.tokens)&&!positive(row.rush_tokens)&&(positive(config.tokens)||positive(settings.rushTokens))){
     db.exec('BEGIN IMMEDIATE');
@@ -42,7 +44,7 @@ function ensureRound(db,id,config,roundMs){
 }
 function publicRewards(row,config){
   const enabled=config.rewards?.enabled??positive(config.tokens);
-  return {enabled,vault:row.vault,catoshiPool:row.tokens,rushPool:row.rush_tokens,rushMint:row.rush_mint,split:JSON.parse(row.splits),winners:10,round:row.id,roundEnds:row.end,payoutMode:'manual-review',fewerPlayers:'normalize-active-shares'};
+  return {enabled,vault:row.vault,catoshiPool:row.tokens,rushPool:row.rush_tokens,rushMint:row.rush_mint,split:JSON.parse(row.splits),winners:10,round:row.id,period:roundWindow(row.id).period,roundStarts:row.start,roundEnds:row.end,payoutMode:'manual-review',fewerPlayers:'normalize-active-shares'};
 }
 function toRaw(tokens,decimals){
   const [whole,fraction='']=tokens.split('.');

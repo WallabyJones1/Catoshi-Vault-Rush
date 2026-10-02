@@ -4,6 +4,7 @@ const {Run}=require('./engine.js');
 const {openDatabase}=require('./server.cjs');
 const {dailyQuest,syncHolderScores}=require('./quest.cjs');
 const {disqualify}=require('./admin.cjs');
+const {DAY_MS,ROUND_MS,currentRound,roundWindow,dayAt,WEEK_ID_OFFSET}=require('./periods.cjs');
 const WALLET='11111111111111111111111111111111';
 function flat(){
  const run=new Run(1);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;run.items=[];run.ramps=[];run.rails=[];run.gaps=[];run.nextFeature=run.nextScenery=Infinity;
@@ -29,6 +30,35 @@ test('gold RUSH grants exactly seven simulation seconds of speed and full gamepl
  Object.assign(run.player,{airborne:1,held:true,angle:Math.PI,vy:1800,vx:400});run.land(200,0);assert(!run.dead);assert.equal(run.lives,2,'ordinary landing damage resumes after the shield');
  const limited=flat();limited.player.rush=7;limited.crash('TIME LIMIT');assert(limited.dead,'power cannot bypass server run duration');
 });
+
+test('weekly periods start on Monday UTC, span seven days and keep historical daily IDs separate',()=>{
+ const monday=Date.UTC(2026,8,28),week=currentRound(monday);
+ assert(week>=WEEK_ID_OFFSET);assert.equal(currentRound(monday+ROUND_MS-1),week);assert.equal(currentRound(monday-1),week-1);
+ assert.equal(currentRound(monday+ROUND_MS),week+1);
+ assert.deepEqual(roundWindow(week),{start:monday,end:monday+ROUND_MS,period:'weekly'});
+ assert.deepEqual(roundWindow(20500),{start:20500*DAY_MS,end:20501*DAY_MS,period:'daily'});
+});
+
+test('daily boosts stay independent within a week and reviewing yesterday cannot change today’s quest',()=>{
+ const db=openDatabase(':memory:'),start=Date.UTC(2026,8,28),week=currentRound(start),day=dayAt(start);
+ const add=(id,score,red,started)=>db.prepare("INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine,score,raw_score,red_tokens,submitted)VALUES(?,'private',1,'Cat',?,'holder',?,?,?,'flow-web-11',?,?,?,?)").run(id,WALLET,week,started,started+1200000,score,score,red,started+1000);
+ const score=id=>db.prepare('SELECT score FROM runs WHERE id=?').get(id).score;
+ try{
+  add('monday-best',1000,5,start+1000);add('monday-second',600,5,start+2000);
+  assert(syncHolderScores(db,WALLET,week,null,day).unlocked);assert.equal(score('monday-best'),2000);
+  add('cross-midnight',500,1,start+DAY_MS-1000);
+  db.prepare("UPDATE runs SET submitted=? WHERE id='cross-midnight'").run(start+DAY_MS+10000);
+  syncHolderScores(db,WALLET,week,null,day);
+  assert.equal(dailyQuest(db,WALLET,week,null,day).collected,11,'start day owns a run that finishes after midnight');
+  assert.equal(dailyQuest(db,WALLET,week,null,day+1).collected,0);
+  add('tuesday-best',1400,5,start+DAY_MS+1000);add('tuesday-second',800,5,start+DAY_MS+2000);
+  syncHolderScores(db,WALLET,week,null,day+1);syncHolderScores(db,WALLET,week,null,day+1);
+  assert.equal(score('monday-best'),2000);assert.equal(score('tuesday-best'),2800,'daily multipliers never stack');
+  disqualify(db,'monday-second','Invalid recording after replay review');
+  assert.equal(score('monday-best'),1000);assert.equal(score('tuesday-best'),2800);
+  assert(dailyQuest(db,WALLET,week,null,day+1).unlocked);assert.equal(dailyQuest(db,WALLET,week,null,day+7).collected,0);
+ }finally{db.close();}
+});
 test('each seed creates only five increasingly distant red routes; red pickups cap at five per run',()=>{
  const layouts=new Set();
  for(let seed=1;seed<=40;seed++){
@@ -52,6 +82,6 @@ test('daily quest doubles only the best raw score, moves to a later best, and in
   assert.equal(dailyQuest(db,WALLET,6).collected,0,'next UTC day resets progress');
   disqualify(db,'third','Invalid run removed after review');assert(!dailyQuest(db,WALLET,5).unlocked);assert.equal(db.prepare("SELECT score FROM runs WHERE id='better'").get().score,1500);
   db.prepare("INSERT INTO reward_plans(round,vault,created)VALUES(5,?,10)").run(WALLET);
-  assert.throws(()=>disqualify(db,'second','Review after payout lock'),/freezes this day/);
+  assert.throws(()=>disqualify(db,'second','Review after payout lock'),/freezes this round/);
  }finally{db.close();}
 });

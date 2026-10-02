@@ -7,20 +7,20 @@
   <meta name="description" content="Catoshi Vault Rush — endless downhill token surfing.">
   <title>Catoshi · Vault Rush</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0908'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23e8a13a'/%3E%3Cpath d='m17 6-7 12h6l-1 8 8-13h-6z' fill='%23f2efe9'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=web-10-guest-home-3">
-  <script defer src="engine.js?v=web-10-guest-home-3"></script>
-  <script defer src="renderer.js?v=web-10-guest-home-3"></script>
-  <script defer src="audio-config.js?v=web-10-quiet-coins-4"></script>
-  <script defer src="sound.js?v=web-10-quiet-coins-4"></script>
-  <script defer src="home.js?v=web-10-guest-home-3"></script>
-  <script defer src="online.js?v=web-10-guest-home-3"></script>
-  <script defer src="game.js?v=web-10-guest-home-3"></script>
+  <link rel="stylesheet" href="styles.css?v=web-11-terrain-weekly-1">
+  <script defer src="engine.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="renderer.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="audio-config.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="sound.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="home.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="online.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="game.js?v=web-11-terrain-weekly-1"></script>
 </head>
 <body>
   <main id="app">
     <section id="gate" class="screen active" aria-labelledby="gate-title">
       <div class="gate-landscape" aria-hidden="true"></div>
-      <header class="home-banner"><p class="eyebrow">CATOSHI</p><div class="prize-banner" aria-label="Daily prize pool"><span>DAILY PRIZE POOL</span><strong id="prize-pool">$0</strong></div></header>
+      <header class="home-banner"><p class="eyebrow">CATOSHI</p><div class="prize-banner" aria-label="Weekly prize pool"><span>WEEKLY PRIZE POOL</span><strong id="prize-pool">$0</strong></div></header>
       <div class="gate-card">
         <div class="brand-lockup"><h1 id="gate-title">VAULT<br><span>RUSH</span></h1><div id="home-mascot" class="home-mascot"><img id="home-catoshi" src="catoshi-home-v2.gif?v=guest-home-3" width="320" height="320" alt="Catoshi balancing, blinking and waving on her gold token" fetchpriority="high"><canvas id="home-catoshi-animation" width="320" height="320" aria-hidden="true" hidden></canvas></div></div>
         <p class="lede">Take the gold. Ride the hills.<br>Make the landing.</p>
@@ -35,11 +35,11 @@
           <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
           <button id="leaderboard-button" class="ghost" type="button">LIVE LEADERBOARD <span aria-hidden="true">↗</span></button>
           <button id="check-day" class="ghost" type="button">MY PROGRESS</button>
-          <details id="holder-daily" class="quest-card" aria-label="Daily red RUSH quest and run history" hidden><summary>MY DAY <span>UTC</span></summary>
-            <p id="holder-runs" class="daily-run-count">0 RUNS TODAY</p>
-            <div class="quest-heading"><strong>RED RUSH QUEST</strong><span id="quest-count">0 / 10</span></div>
+          <details id="holder-daily" class="quest-card" aria-label="Weekly run history and daily red RUSH quest" hidden><summary>MY WEEK <span>UTC</span></summary>
+            <p id="holder-runs" class="daily-run-count">0 RUNS THIS WEEK</p>
+            <div class="quest-heading"><strong>RED RUSH TODAY</strong><span id="quest-count">0 / 10</span></div>
             <progress id="quest-progress" max="10" value="0" aria-label="Daily red RUSH collected"></progress>
-            <details class="run-history"><summary>MY RUNS · TODAY <span>UTC</span></summary><ol id="daily-history"></ol><p id="history-empty" class="practice-note">Your completed runs will appear here.</p></details>
+            <details class="run-history"><summary>MY RUNS · THIS WEEK <span>UTC</span></summary><ol id="daily-history"></ol><p id="history-empty" class="practice-note">Your completed runs will appear here.</p></details>
           </details>
         </section>
       </div>
@@ -55,7 +55,7 @@
             <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span><div id="lives" class="lives" role="img" aria-label="3 of 3 lives"><i id="life-1" aria-hidden="true"></i><i id="life-2" aria-hidden="true"></i><i id="life-3" aria-hidden="true"></i></div></div>
           </div>
           <div id="rush-burst" class="rush-burst" hidden><strong>RUSH · SHIELDED</strong><span id="rush-time">7.0s</span><progress id="rush-meter" max="7" value="7" aria-label="RUSH burst remaining"></progress></div>
-          <p id="mode-label" class="mode-label">DAILY RUN</p>
+          <p id="mode-label" class="mode-label">WEEKLY RUN</p>
           <div id="trick" class="trick" role="status" aria-live="polite"></div>
           <p id="warning" class="warning" hidden>LOW SPEED · HOUND NEARBY</p>
           <div class="speed-readout"><span id="speed">31</span><small>KM/H</small></div>
@@ -76,7 +76,7 @@
 
     <section id="result" class="screen result" aria-labelledby="result-title">
       <div class="result-card">
-        <p class="eyebrow" id="result-kicker">DAILY RUN</p>
+        <p class="eyebrow" id="result-kicker">WEEKLY RUN</p>
         <h2 id="result-title">ONE MORE<br>RUN?</h2>
         <p id="result-reason" class="result-reason">Crash landing</p>
         <div class="result-grid">
@@ -89,7 +89,7 @@
         <button id="again" class="primary" type="button">RIDE AGAIN</button>
         <p id="personal-best" class="personal-best" role="status"></p>
         <button id="change-wallet" class="ghost" type="button">BACK TO MENU</button>
-        <p id="result-copy" class="practice-note">Your best checked run counts on the daily leaderboard.</p>
+        <p id="result-copy" class="practice-note">Your best checked run counts on the weekly leaderboard.</p>
         <p id="submission-status" class="status" role="status" aria-live="polite"></p>
         <div class="share-actions"><a id="share-x" class="share-link" href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST SCORE TO X ↗</a><button id="copy-score" class="ghost" type="button">COPY</button></div>
         <button id="result-leaderboard" class="ghost" type="button">LIVE LEADERBOARD</button>
@@ -99,8 +99,8 @@
     <section id="leaderboard-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" hidden>
       <div class="board-card">
         <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="leaderboard-title">LEADERBOARD</h2></div><button id="close-leaderboard" class="ghost" type="button" aria-label="Close leaderboard">×</button></div>
-        <div class="board-prize-line"><span>TOP 10 <small>DAILY RANKINGS</small></span><small>BEST RUN COUNTS</small></div>
-        <div class="board-tabs"><button id="board-holder" type="button">TODAY</button><button id="board-previous" type="button">YESTERDAY</button></div>
+        <div class="board-prize-line"><span>TOP 10 <small>WEEKLY RANKINGS</small></span><small>BEST RUN COUNTS</small></div>
+        <div class="board-tabs"><button id="board-holder" type="button">THIS WEEK</button><button id="board-previous" type="button">LAST WEEK</button></div>
         <div class="board-toolbar"><p id="board-round-time" class="practice-note"></p><button id="board-refresh" class="ghost" type="button">REFRESH</button></div>
         <p id="leaderboard-explainer" class="practice-note">BEST RUN PER PLAYER</p>
         <table class="rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">SCORE</th><th scope="col">DISTANCE</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>

@@ -67,7 +67,7 @@
     phase = 'loading';
     ui['pause-panel'].hidden = true; ui.warning.hidden = true;
     ui.trick.classList.remove('visible'); ui.trick.textContent = '';
-    ui['mode-label'].textContent = 'DAILY RUN';
+    ui['mode-label'].textContent = 'WEEKLY RUN';
     ui.countdown.textContent = 'LOADING';
     show('game-screen'); resizeGame(); drawLoading();
     try {
@@ -80,11 +80,11 @@
       if(!onlineTicket?.id||!Number.isInteger(onlineTicket.seed))throw new Error('Could not reserve your run. Please retry.');
       setRunTicket(onlineTicket);
       wallet=onlineTicket.wallet||'';
-      ui['mode-label'].textContent='DAILY RUN';
+      ui['mode-label'].textContent='WEEKLY RUN';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = new VaultRush.Run(onlineTicket.seed); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       sound.setPlaying(true);
-      phase = 'countdown'; countdown = 1.7; accumulator = 0; trickTime = 0;
+      phase = 'countdown'; countdown = VaultRushRenderer.INTRO_DURATION || 1.25; accumulator = 0; trickTime = 0;
       ui.countdown.textContent = 'READY';
       updateHud(); last = performance.now();
       canvas.focus({ preventScroll: true });
@@ -149,7 +149,7 @@
     $('personal-best').textContent='';
     $('result-quest').textContent='Checking daily quest…';
     $('run-pickups').textContent=run.redTokens+' RED RUSH · '+run.rushPickups+' SPEED BURST'+(run.rushPickups===1?'':'S');
-    ui['result-kicker'].textContent = 'DAILY RUN';
+    ui['result-kicker'].textContent = 'WEEKLY RUN';
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
     ui['result-copy'].textContent = wallet
       ? 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Enabled prizes are reviewed and paid by the team.'
@@ -170,8 +170,9 @@
     if (phase === 'countdown') {
       const before=countdown;
       countdown -= dt;
-      if(before>1.08&&countdown<=1.08)sound.burst();
-      ui.countdown.textContent = countdown > 1.08 ? 'READY' : countdown > .5 ? 'BREAK OUT' : 'RUSH';
+      const breach=VaultRushRenderer.BREACH_REMAINING || .91;
+      if(before>breach&&countdown<=breach)sound.burst();
+      ui.countdown.textContent = countdown > breach ? 'READY' : countdown > .38 ? 'BREAK OUT' : '';
       if (countdown <= 0) { phase = 'running'; ui.countdown.textContent = ''; accumulator = 0; }
     } else if (phase === 'running') {
       accumulator += dt;
