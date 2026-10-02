@@ -104,6 +104,7 @@
       if (event.type === 'coin') this.burst(event.x, event.y, '#e8a13a', 4, 50);
       if(event.type==='rush')this.burst(event.x,event.y,'#e8a13a',20,190);
       if(event.type==='redRush')this.burst(event.x,event.y,'#e03b3b',12,100);
+      if(event.type==='heart')this.burst(event.x,event.y,'#3ddc54',12,90);
       if (event.type === 'land') { this.landPose = .22; this.burst(event.x, event.y, '#8d8880', 8); }
       if(event.type==='jump'){
         this.jumpPose=.18;this.burst(event.x,event.y,'#8d8880',5,45);
@@ -115,6 +116,7 @@
         this.shake=event.heavy?.24:.14;this.impactPose=event.heavy?.55:.32;
         this.burst(event.x,event.y-8,'#8d8880',event.heavy?14:8,110);
         this.burst(event.x,event.y-25,'#e8a13a',4,65);
+        if(event.lifeLost)this.burst(event.x,event.y-20,'#e03b3b',6,65);
         if(event.obstacle)this.hitObjects.push({...event.obstacle,life:.42,angle:event.obstacleAngle??event.angle});
       }
       if (event.type === 'crash') {
@@ -211,7 +213,9 @@
       const zoom = clamp(.94 - Math.max(0, p.speed - 300) * .0004 - altitude * .00013, portrait?.68:.72, .94);
       const ease = 1 - Math.exp(-dt * 3.8);
       this.camera.zoom += (zoom - this.camera.zoom) * ease;
-      const targetY = p.y + altitude * .58 - this.height * (portrait?.60:.64) / this.camera.zoom;
+      // Keep the hero inside the frame even on the highest balloon routes.
+      const lookDown=Math.min(altitude*.48,this.height*.24/this.camera.zoom);
+      const targetY = p.y + lookDown - this.height * (portrait?.60:.64) / this.camera.zoom;
       this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 5));
       const launchProgress=clamp((1.08-this.intro)/1.08,0,1);
       const focusX=this.intro>0 ? -88+88*(1-Math.pow(1-launchProgress,2)) : p.x;
@@ -378,8 +382,8 @@
         if (rail.end < left || rail.x > right) continue;
         // Cargo balloons hold the optional upper route, not a flat ground rail.
         ctx.globalAlpha = .8;
-        this.prop(4, rail.x, rail.y + 28, 82);
-        this.prop(4, rail.end, rail.endY + 28, 105);
+        this.prop(4,rail.x,rail.y+28,rail.high?112:82);
+        this.prop(4,rail.end,rail.endY+28,rail.high?128:105);
         ctx.globalAlpha = 1;
         ctx.beginPath(); ctx.moveTo(rail.x,rail.y);
         for(let x=rail.x+12;x<rail.end;x+=12)ctx.lineTo(x,run.railY(rail,x));
@@ -387,6 +391,17 @@
         ctx.strokeStyle='#88704c';ctx.lineWidth=3;ctx.stroke();
         ctx.strokeStyle='rgba(232,161,58,.42)';ctx.lineWidth=1;ctx.stroke();
       }
+    }
+    heart(x,y,size) {
+      const ctx=this.ctx;
+      ctx.save();ctx.translate(x,y);ctx.scale(size/24,size/24);
+      ctx.fillStyle='#3ddc54';ctx.strokeStyle='#f2efe9';ctx.lineWidth=1.1;
+      ctx.beginPath();ctx.moveTo(12,21);
+      ctx.bezierCurveTo(9,18,2,13,2,7);
+      ctx.bezierCurveTo(2,1,9,0,12,5);
+      ctx.bezierCurveTo(15,0,22,1,22,7);
+      ctx.bezierCurveTo(22,13,15,18,12,21);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.restore();
     }
     draw(run) {
       const ctx = this.ctx, p = this.visualPlayer||run.player, cam = this.camera;
@@ -421,6 +436,12 @@
         if(item.type==='coin'){
           const width=portrait?17:12,spin=.82+.18*Math.cos(run.time*3+item.x*.03);
           ctx.drawImage(this.images.coin,item.x-width*spin/2,item.y-width/2,width*spin,width);
+        }
+        else if(item.type==='heart'){
+          const size=portrait?28:23,pulse=1+Math.sin(this.clock*3+item.x)*.07;
+          ctx.save();ctx.globalAlpha=.11;ctx.fillStyle='#3ddc54';
+          ctx.beginPath();ctx.arc(item.x,item.y,size*.82*pulse,0,Math.PI*2);ctx.fill();ctx.restore();
+          this.heart(item.x-size/2,item.y-size/2,size*pulse);
         }
         else if(item.type==='rush'||item.type==='redRush'){
           const red=item.type==='redRush',width=red?(portrait?30:25):(portrait?54:46),pulse=1+Math.sin(this.clock*3+item.x)*.06;

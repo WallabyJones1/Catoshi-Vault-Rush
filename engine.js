@@ -45,9 +45,15 @@
       this.nextScenery = -50;
       this.feature = 0;
       this.redSites = 0;
+      this.lastRedSite = 0;
       this.lastRushSite = 0;
       this.redTokens = 0;
       this.rushPickups = 0;
+      this.maxLives = 3;
+      this.lives = this.maxLives;
+      this.heartsCollected = 0;
+      this.heartSites = 0;
+      this.nextHeartSite = 8000 + this.terrainRandom(0, 86028121) * 6500;
       this.player = {
         x: 0, y: this.terrain(0), speed: 310, vx: 310, vy: 0,
         angle: this.slope(0), grounded: true, rail: null, ramp: null,
@@ -79,8 +85,8 @@
     }
     region(x) {
       const cell = Math.floor((x - 1800) / 4200);
-      const mode = Math.floor(this.terrainRandom(cell, 7919) * 5);
-      return ['ROLLING DUNES', 'GIANT DUNE', 'DEEP VALLEY', 'RUSH DESCENT', 'RIDGELINE'][mode];
+      const mode = Math.floor(this.terrainRandom(cell, 7919) * 6);
+      return ['ROLLING DUNES', 'GIANT DUNE', 'DEEP VALLEY', 'RUSH DESCENT', 'RIDGELINE', 'SALT FLATS'][mode];
     }
     biome(x) { return this.biomes[Math.floor(Math.max(0,x)/this.biomeSpan)%this.biomes.length]; }
     biomeTransition(x) {
@@ -93,24 +99,36 @@
         + Math.sin(x * TAU / t.shortWave + t.shortPhase) * t.shortHeight;
       // A broad, safe entry slope blends into non-repeating terrain after 120m.
       const blend = this.smooth(clamp((x - 1200) / 1500, 0, 1));
-      let varied = this.noise(x, 1800, 173) * 165 + this.noise(x, 650, 947) * 38;
+      let varied = this.noise(x, 2100, 173) * 185 + this.noise(x, 760, 947) * 48;
       const cell = Math.floor((x - 1800) / 4200);
       for (let i = cell - 1; i <= cell + 1; i++) {
-        const mode = Math.floor(this.terrainRandom(i, 7919) * 5);
+        const mode = Math.floor(this.terrainRandom(i, 7919) * 6);
         const center = 1800 + i * 4200 + 1300 + this.terrainRandom(i, 104729) * 1500;
-        const radius = 1400 + this.terrainRandom(i, 15485863) * 450;
+        const radius = 1250 + this.terrainRandom(i, 15485863) * 550;
         const u = (x - center) / radius;
         if (Math.abs(u) >= 1) continue;
         // Compact C2 bumps: no seams, cliffs or sudden changes in slope.
         const envelope = Math.pow(1 - u * u, 3);
-        const height = 260 + this.terrainRandom(i, 32452843) * 290;
+        const height = 420 + this.terrainRandom(i, 32452843) * 380;
         if (mode === 1) varied -= height * envelope;
         else if (mode === 2) varied += height * envelope;
         else if (mode === 3) varied += height * u * envelope;
-        else if (mode === 4) varied -= 200 * envelope * Math.cos(u * Math.PI * 2);
-        else varied += 105 * envelope * Math.sin(u * Math.PI * 3);
+        else if (mode === 4) varied -= 210 * envelope * Math.cos(u * Math.PI * 2);
+        else if (mode === 0) varied += 145 * envelope * Math.sin(u * Math.PI * 3);
       }
-      return 230 + x * t.grade + opening * (1 - blend) + varied * blend;
+      let ground = 230 + x * t.grade + opening * (1 - blend) + varied * blend;
+      for (let i = Math.max(0, cell - 1); i <= cell + 1; i++) {
+        if (Math.floor(this.terrainRandom(i, 7919) * 6) !== 5) continue;
+        const center = 1800 + i * 4200 + 1300 + this.terrainRandom(i, 104729) * 1500;
+        const half = 450 + this.terrainRandom(i, 49979687) * 200;
+        const edge = 650, distance = Math.abs(x - center);
+        if (distance >= half + edge) continue;
+        const weight = (distance <= half ? 1 : 1 - this.smooth((distance - half) / edge)) * blend;
+        const tilt = .02 + this.terrainRandom(i, 67867967) * .04;
+        const flat = 230 + center * t.grade + this.noise(center, 2100, 173) * 110 + (x - center) * tilt;
+        ground += (flat - ground) * weight;
+      }
+      return ground;
     }
     rampLift(ramp,x) {
       if(x<ramp.x||x>ramp.recovery)return 0;
@@ -132,7 +150,7 @@
     gapAt(x) { return this.gaps.find(g => x > g.x && x < g.end); }
     railY(rail, x) {
       const t = clamp((x - rail.x) / (rail.end - rail.x), 0, 1);
-      return rail.y + (rail.endY - rail.y) * t + Math.sin(t * Math.PI) * 35;
+      return rail.y + (rail.endY - rail.y) * t + Math.sin(t * Math.PI) * (rail.sag ?? 35);
     }
     railSlope(rail, x) { return Math.atan((this.railY(rail, x + 2) - this.railY(rail, x - 2)) / 4); }
     rampY(ramp, x) {
@@ -148,6 +166,68 @@
         this.items.push({ type: 'coin', x: cx, y: this.terrain(cx) - 26 - Math.sin(i / (count - 1) * Math.PI) * (arc || 0), hit: false });
       }
     }
+    makeRamp(x, long) {
+      const end = x + (long ? 350 : 255) + this.random() * (long ? 130 : 85);
+      const ramp = { x, end, recovery:end + 280 + this.random() * 90,
+        height:(long ? 90 : 65) + this.random() * (long ? 35 : 25), y:this.terrain(x),
+        launch:(long ? 220 : 155) + this.random() * 55 };
+      for (let tune=0; tune<5; tune++) {
+        let steep=false;
+        for (let cx=x; cx<=ramp.recovery; cx+=12) {
+          if (Math.abs((this.rampY(ramp,cx+1)-this.rampY(ramp,cx-1))*.5)>1.7) steep=true;
+        }
+        if (!steep) break;
+        ramp.height*=.75;
+      }
+      ramp.endY=this.rampY(ramp,end);
+      this.ramps.push(ramp);
+      return ramp;
+    }
+    balloonChain(x, index) {
+      // Search for a clear sky route instead of raising an intersecting cable
+      // beyond jump height. All choices are seed-based, including the gaps.
+      for (let attempt=0; attempt<28; attempt++) {
+        const start=x+attempt*80, count=2+Math.floor(this.terrainRandom(index,8675309)*2);
+        const ramp={x:start,end:start+390+this.terrainRandom(index,952733)*65,
+          height:90+this.terrainRandom(index,961748941)*25,launch:290,y:this.terrain(start)};
+        ramp.recovery=ramp.end+310;
+        ramp.endY=this.rampY(ramp,ramp.end);
+        const first=ramp.end+65, span=410+this.terrainRandom(index,104395303)*115;
+        const gap=90+this.terrainRandom(index,122949829)*50;
+        const end=first+span*count+gap*(count-1);
+        const grade=clamp((this.baseTerrain(end)-this.baseTerrain(first))/(end-first)-.08,-.27,.45);
+        const entry=ramp.endY-85, rails=[];
+        let clear=true;
+        for (let part=0; part<count; part++) {
+          const rx=first+part*(span+gap), re=rx+span;
+          const rail={x:rx,end:re,y:entry+(rx-first)*grade-(part?30:0),
+            endY:entry+(re-first)*grade-(part?30:0),sag:22,chain:index,part,high:true};
+          for (let cx=rx; cx<=re; cx+=16) {
+            if (this.railY(rail,cx)>this.terrain(cx)-this.rampLift(ramp,cx)-65) clear=false;
+          }
+          rails.push(rail);
+        }
+        if (!clear || Math.abs(this.rampSlope(ramp,ramp.end))>1.02) continue;
+        this.ramps.push(ramp);
+        this.rails.push(...rails);
+        return {x:start,end,ramp,rails};
+      }
+      return null;
+    }
+    placeHeart(x, spacing, index) {
+      if (x<this.nextHeartSite) return;
+      const upper=this.rails.filter(rail=>rail.x>=x&&rail.end<x+spacing);
+      const rail=upper.length&&this.terrainRandom(index,141650939)<.4?upper[upper.length-1]:null;
+      let cx=rail?rail.x+(rail.end-rail.x)*.6:x+spacing*.7;
+      const gap=this.gapAt(cx);
+      if (gap) cx=gap.end+90;
+      // Hearts never share a rock's hitbox or sit in a dangerous gap.
+      for (const item of this.items) if (this.touchesGroundHazard(item)&&Math.abs(item.x-cx)<100) cx=item.x+110;
+      const cy=rail?this.railY(rail,cx)-24:this.terrain(cx)-30;
+      this.items.push({type:'heart',x:cx,y:cy,hit:false});
+      this.nextHeartSite=cx+13500+this.terrainRandom(this.heartSites++,86028121)*8500;
+    }
+    touchesGroundHazard(item) { return item.hazard||['rock','crate','log'].includes(item.type); }
     generate(ahead) {
       const limit = this.player.x + ahead;
       while (this.nextFeature < limit) {
@@ -156,8 +236,8 @@
         const stage = Math.min(4, Math.floor(x / 5000));
         const biome=this.biome(x),uphill=this.derivative(x)<-.12;
         // Each environment has a different rhythm without consuming terrain RNG.
-        const choices=uphill?[0,0,7,7,2,3,5]:biome===1?[0,2,3,5,7,4,4,8,9]
-          :biome===2?[0,0,2,3,5,7,8,8,9]:biome===3?[0,2,2,3,7,4,8,9,9]:[0,0,2,2,3,5,7,4,8,9];
+        const choices=uphill?[0,7,7,2,3,5,5]:biome===1?[0,2,3,5,5,7,4,4,8,9]
+          :biome===2?[0,2,3,5,5,7,8,8,9]:biome===3?[0,2,3,5,5,7,4,8,9,9]:[0,2,2,3,3,5,5,7,4,8,9];
         let pattern = index === 0 ? 0 : index === 1 ? (this.random() < .55 ? 7 : 0) : choices[Math.floor(this.random() * choices.length)];
         // Active-play gates appear after the gentle introduction. They are
         // spaced apart from automatic ramps and have clear run-up/landing space.
@@ -165,7 +245,7 @@
         // Five optional quest routes, progressively farther apart. A day's
         // ten-token goal is cumulative across runs, never ten in one run.
         const tiers=[9000,17500,31000,48000,72000];
-        const redSite=this.redSites<5&&x>=tiers[this.redSites]+this.terrainRandom(this.redSites,62851)*700;
+        const redSite=this.redSites<5&&x>=Math.max(tiers[this.redSites]+this.terrainRandom(this.redSites,62851)*700,this.lastRedSite+5500);
         if(redSite)pattern=this.terrainRandom(this.redSites,68389)<.5?3:5;
         if(pattern===10){
           // Put required jumps after a readable approach, not at the end of
@@ -190,16 +270,7 @@
         this.lastPattern = pattern;
         let spacing = 440 + this.random() * 410;
         if (pattern === 2 || pattern === 3) {
-          const long=pattern===3,end=x+(long?320:230)+this.random()*(long?110:65);
-          const ramp={x,end,recovery:end+220+this.random()*(long?90:45),height:(long?60:48)+this.random()*(long?24:20),y,
-            launch:long?130+this.random()*30:100+this.random()*25};
-          for(let tune=0;tune<4;tune++){
-            let steep=false;
-            for(let cx=x;cx<=ramp.recovery;cx+=12)if(Math.abs((this.rampY(ramp,cx+1)-this.rampY(ramp,cx-1))*.5)>1.35)steep=true;
-            if(!steep)break;ramp.height*=.7;
-          }
-          ramp.endY=this.rampY(ramp,ramp.end);
-          this.ramps.push(ramp);
+          const ramp=this.makeRamp(x,pattern===3);
           // Above the ordinary automatic launch: tap near the lip to reach it.
           const special=redSite?'redRush':x>5000&&x-this.lastRushSite>6000&&this.terrainRandom(index,73939)<.45?'rush':null;
           if(special){
@@ -207,37 +278,47 @@
             const flight=165/(speed*Math.cos(angle));
             const cy=ramp.endY+(speed*Math.sin(angle)-(350+speed*.18))*flight+345*flight*flight-17;
             this.items.push({type:special,x:cx,y:Math.min(cy,this.terrain(cx)-65),hit:false});
-            if(redSite)this.redSites++;else this.lastRushSite=x;
+            if(redSite){this.redSites++;this.lastRedSite=cx;}else this.lastRushSite=x;
           }
           for (let i = 0; i < 8; i++) {
             const cx = ramp.end + 45 + i * 38;
-            this.items.push({ type: 'coin', x: cx, y: ramp.endY - 40 - Math.sin(i / 7 * Math.PI) * 120, hit: false });
+            const flight=(cx-ramp.end)/(470*Math.cos(this.rampSlope(ramp,ramp.end)));
+            const vy=470*Math.sin(this.rampSlope(ramp,ramp.end))-ramp.launch;
+            const cy=ramp.endY+vy*flight+345*flight*flight-17;
+            this.items.push({ type:'coin',x:cx,y:Math.min(cy,this.terrain(cx)-26),hit:false });
           }
           spacing = ramp.recovery-x+270+this.random()*170;
         } else if (pattern === 5) {
+          const chain=this.balloonChain(x,index);
+          if (chain) x=chain.x;
           const end = x + 760 + this.random() * 170;
-          const rail = { x, end, y: y - 105, endY: this.terrain(end) - 130 };
-          let clearance = 0;
-          for (let cx = x; cx <= end; cx += 16) clearance = Math.max(clearance, this.railY(rail,cx) - this.terrain(cx) + 55);
-          rail.y -= clearance; rail.endY -= clearance;
-          this.rails.push(rail);
+          let route;
+          if (chain) route=chain.rails;
+          else {
+            const rail={x,end,y:y-105,endY:this.terrain(end)-130};
+            let clearance=0;
+            for (let cx=x;cx<=end;cx+=16) clearance=Math.max(clearance,this.railY(rail,cx)-this.terrain(cx)+55);
+            rail.y-=clearance;rail.endY-=clearance;
+            this.rails.push(rail);route=[rail];
+          }
+          const rail=route[route.length-1];
           const special=redSite?'redRush':x>5000&&x-this.lastRushSite>6000&&this.terrainRandom(index,73939)<.55?'rush':null;
           if(special){
-            const cx=x+(end-x)*.83;
+            const cx=rail.x+(rail.end-rail.x)*.83;
             this.items.push({type:special,x:cx,y:this.railY(rail,cx)-(redSite?24:88),hit:false});
-            if(redSite)this.redSites++;else this.lastRushSite=x;
+            if(redSite){this.redSites++;this.lastRedSite=cx;}else this.lastRushSite=x;
           }
-          for (let i = 1; i <= 17; i++) {
-            const cx = x + i * (rail.end - x) / 19;
-            this.items.push({ type: 'coin', x: cx, y: this.railY(rail, cx) - 24, hit: false });
+          for (const wire of route) for (let i=1;i<=11;i++) {
+            const cx=wire.x+i*(wire.end-wire.x)/12;
+            this.items.push({type:'coin',x:cx,y:this.railY(wire,cx)-24,hit:false});
           }
           this.coinTrail(x - 100, 5, 135);
-          spacing = 1080 + this.random() * 260;
+          spacing = (chain?chain.end-x:1080)+300+this.random()*200;
         } else if (pattern === 7) {
           this.items.push({ type: 'boost', x, y: y - 3, hit: false });
           this.coinTrail(x + 70, 8, 15);
         } else if (pattern === 9 && x>4500 && this.derivative(x) > .05) {
-          const gap = { x, end: x + 240 + stage * 24 };
+          const gap = { x, end:x+240+stage*30+this.terrainRandom(index,16908799)*100 };
           this.gaps.push(gap);
           this.coinTrail(x - 180, 11, 140);
           spacing = 700 + this.random() * 190;
@@ -256,6 +337,7 @@
           if (stage > 1 && this.random() < 0.45) this.items.push({ type: 'rock', x: x + 145, y: this.terrain(x + 145), hit: false });
           this.coinTrail(x + 150, 7, 30);
         } else this.coinTrail(x, 8 + Math.floor(this.random() * 4), index % 3 === 0 ? 95 : 0);
+        this.placeHeart(x,spacing,index);
         this.nextFeature = x+spacing;
       }
       while (this.nextScenery < limit + 700) {
@@ -311,13 +393,19 @@
       const impact = p.vy * Math.cos(angle) - p.vx * Math.sin(angle);
       const rotation = Math.abs(angleDelta(p.angle - angle));
       const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
-      if (p.rush<=0 && p.recovery<=0 && !p.recoveryGap && p.airborne > 0.25 && (p.held && rotation > 1.02)) {
-        this.crash('CRASH LANDING');
-        return;
-      }
+      const badFlip=p.rush<=0&&p.invulnerable<=0&&p.recovery<=0&&!p.recoveryGap&&p.airborne>.25&&p.held&&rotation>1.02;
       p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?850:115, p.rush>0?1080:780);
-      const rough=p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
-      if(rough){
+      const rough=badFlip||p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
+      if (badFlip) {
+        // A mistimed flip spends one life, just like a rock. An upright
+        // automatic landing, however high, does not spend a life.
+        p.speed=Math.max(115,p.speed*.55);p.stagger=.65;p.recovery=2;p.invulnerable=1.25;
+        this.combo=1;this.slowTime=0;
+        if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
+        this.lives--;
+        this.event('stumble',{x:p.x,y,angle,heavy:true,material:'stone',kind:'flip',lifeLost:true,lives:this.lives,fatal:this.lives===0});
+        if(this.lives===0){p.y=y;this.crash('OUT OF LIVES');return;}
+      } else if(rough){
         // Auto-aligned high falls are recoverable. Fall speed alone must never
         // kill a rider whose board is upright; keep the impact readable.
         p.speed=Math.max(150,p.speed*.72);p.stagger=Math.max(p.stagger,.38);
@@ -360,15 +448,15 @@
       const p = this.player;
       // Consume a collision once, including during recovery. No obstacle can
       // trap the rider inside its hitbox and repeatedly remove momentum.
-      if (item.hit) return;
+      if (item.hit || this.dead) return;
       item.hit = true;
-      if (p.invulnerable > 0) return;
+      if (p.invulnerable > 0 || p.rush > 0) return;
       const heavy=Boolean(item.heavy||item.hazard),before=p.speed;
       p.speed=Math.min(before,clamp(before*(heavy?.32:.60),heavy?90:120,heavy?150:240));
       p.vx*=p.speed/Math.max(1,before);
       if(!p.grounded)p.vy*=.8;
       p.boost=0;
-      p.invulnerable=heavy?.85:.65;
+      p.invulnerable=1.25;
       p.stagger=heavy?.65:.38;
       p.recovery=heavy?2:1.2;
       p.spin=0;p.turns=0;
@@ -378,9 +466,11 @@
       if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
       this.combo = 1;
       this.slowTime = 0;
+      this.lives--;
       const material=['barrier','cart','stack','crate'].includes(item.type)?'metal':item.type==='log'?'wood':'stone';
       this.event('stumble', { x:p.x,y:p.y,angle:p.angle,heavy,loss:before-p.speed,material,
-        obstacle:{...item},obstacleAngle:this.slope(item.x),kind:item.type });
+        obstacle:{...item},obstacleAngle:this.slope(item.x),kind:item.type,lifeLost:true,lives:this.lives,fatal:this.lives===0 });
+      if(this.lives===0)this.crash('OUT OF LIVES');
     }
     touchesObstacle(item,previousX=this.player.x) {
       const p=this.player;
@@ -474,6 +564,7 @@
         // Otherwise touching a tall object and landing in the same tick could
         // bypass stumble() entirely and look like the object killed the run.
         for(const item of this.items)if(this.touchesObstacle(item,previousX))this.stumble(item);
+        if(this.dead)return;
         if(this.gapAt(p.x)&&p.recovery>0)p.recoveryGap=this.gapAt(p.x);
         let landed = false;
         if (p.vy > -60) {
@@ -506,6 +597,12 @@
           this.coins++;
           this.score += 30 * this.combo;
           this.event('coin', { x: item.x, y: item.y });
+        } else if(item.type==='heart'&&Math.abs(item.y-(p.y-17))<32){
+          item.hit=true;
+          if(this.lives<this.maxLives){
+            this.lives++;this.heartsCollected++;
+            this.event('heart',{x:item.x,y:item.y,lives:this.lives});
+          }
         } else if(['rush','redRush'].includes(item.type)&&Math.abs(item.y-(p.y-17))<(item.type==='rush'?42:32)){
           item.hit=true;
           if(item.type==='rush'){
@@ -545,5 +642,5 @@
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-9' };
+  return { Run, clamp, angleDelta, TAU, VERSION: 'flow-web-10' };
 });

@@ -43,12 +43,12 @@ test('terrain has large smooth hills, distinct regions and lookup-order-independ
     for(let x=3000;x<28000;x+=20){
       modes.add(a.region(x));const height=a.terrain(x)-x*a.profile.grade;
       low=Math.min(low,height);high=Math.max(high,height);
-      assert(Math.abs(a.derivative(x))<1.55,'readable slopes, no random cliffs');
+      assert(Math.abs(a.derivative(x))<2.5,'steeper hills remain continuous slopes, never vertical cliffs');
       assert(Math.abs(a.derivative(x+.01)-a.derivative(x-.01))<.001,'smooth terrain seams');
     }
     biggest=Math.max(biggest,high-low);
   }
-  assert.equal(modes.size,5);assert(openings.size>75);assert(biggest>800,'occasional genuinely big dunes and valleys');
+  assert.equal(modes.size,6);assert(openings.size>75);assert(biggest>1200,'tall dunes and deep valleys vary the ride');
 });
 test('deterministic server replay ignores fabricated score fields and rejects invalid recordings',()=>{
   const input=simulate(111);const checked=security.replay(111,input.ticks,input.inputs);
@@ -101,7 +101,7 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   assert.equal((await request('/health')).res.status,200);
   const rules=(await request('/api/config')).value;assert.equal(rules.minimumTokens,0);assert(!rules.prizesEnabled);assert(!rules.paidModeEnabled);
   assert.equal((await request('/api/runs/start',{mode:'practice',engine:security.ENGINE_VERSION},'https://evil.invalid')).res.status,403);
-  assert.equal((await request('/api/runs/start',{mode:'holder',engine:security.ENGINE_VERSION})).res.status,400);
+  const guest=(await request('/api/runs/start',{mode:'holder',engine:security.ENGINE_VERSION}));assert.equal(guest.res.status,200);assert.equal(guest.value.wallet,null);assert.equal(guest.value.prizeEligible,false);
   assert.equal((await request('/api/runs/start',{mode:'practice',wallet,engine:security.ENGINE_VERSION})).res.status,400);
   const ticket=(await request('/api/runs/start',{name:'Cat Runner',wallet:security.MINT,engine:security.ENGINE_VERSION})).value;assert(ticket.id&&ticket.seed);
   const simulation=simulate(ticket.seed);clock+=simulation.ticks/120*1000+2000;
@@ -162,7 +162,7 @@ class Element {
   constructor(id){this.id=id;this.hidden=true;this.value='';this.disabled=false;this.textContent='';this.listeners={};this.classList={toggle(){},remove(){},add(){}};}
   addEventListener(type,fn){(this.listeners[type]||=[]).push(fn);}
   dispatch(type,data={}){return Promise.all((this.listeners[type]||[]).map(fn=>fn({preventDefault(){},target:this,...data})));}
-  appendChild(){}focus(){}setPointerCapture(){}setAttribute(){}
+  appendChild(){}focus(){}setPointerCapture(){}setAttribute(name,value){this[name]=value;}
 }
 test('one Play button, touch/keyboard, pause/resume, failed server start and vault burst UI wiring',async()=>{
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
@@ -170,25 +170,33 @@ test('one Play button, touch/keyboard, pause/resume, failed server start and vau
   const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
   document.querySelectorAll=()=>['gate','game-screen','result'].map(id=>elements[id]);document.createElement=tag=>new Element(tag);
   elements.game.getContext=()=>({fillRect(){}});let now=0,frame=null,createdRun,bursts=0,sounds=0;
-  let startsFail=false,prepares=0;const ticket={id:'ticket',wallet:security.MINT,seed:123,maxTicks:72000};
+  let startsFail=false,prepares=0;const ticket={id:'ticket',wallet:null,seed:123,maxTicks:72000};
   window.RushOnline={prepare:async()=>{prepares++;if(startsFail)throw Error('offline');return ticket;},submit:async()=>null,share(){},setWallet(){}};
   window.RushSound={unlock(){},setPlaying(){},effect(){sounds++;},burst(){bursts++;}};
   const context={document,window,console,setTimeout,clearTimeout,performance:{now:()=>now},VaultRush:{Run:class extends Run{constructor(seed){super(seed);createdRun=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
   assert(!elements['practice-button']&&!elements['board-practice']);
+  assert(html.indexOf('id="holder-name"')<html.indexOf('id="wallet"'),'wallet appears under the name');
+  assert(!/<input id="wallet"[^>]*\brequired\b/.test(html),'wallet is optional in the native form');
   elements.wallet.value='invalid';await elements['wallet-form'].dispatch('submit');assert.equal(prepares,0);
-  elements.wallet.value=security.MINT;await elements['wallet-form'].dispatch('submit');assert(createdRun);
+  elements.wallet.value='';await elements['wallet-form'].dispatch('submit');assert(createdRun,'a blank optional wallet must start the game');
   await elements['wallet-form'].dispatch('submit');assert.equal(prepares,1,'repeat submit cannot start a second run');
   const frames=count=>{for(let i=0;i<count;i++){now+=1000/60;const cb=frame;frame=null;cb?.(now);}};
   frames(20);assert.equal(createdRun.time,0,'no hidden simulation during vault animation');assert.equal(bursts,0);
   frames(100);assert.equal(bursts,1);
+  assert.equal(elements.lives['aria-label'],'3 of 3 lives');
+  for(const type of ['selectstart','contextmenu']){
+    let prevented=false;await elements['game-screen'].dispatch(type,{preventDefault(){prevented=true;}});
+    assert(prevented,'long presses in the play area do not select text or open a callout');
+    assert(!elements.wallet.listeners[type],'wallet editing is not blocked');
+  }
   await elements['jump-control'].dispatch('pointerdown',{pointerId:1,pointerType:'touch'});assert(createdRun.player.held&&!createdRun.player.grounded);assert(sounds>0);
   await elements['jump-control'].dispatch('pointerup',{pointerId:1,pointerType:'touch'});assert(!createdRun.player.held);
   const before=createdRun.time;await elements.pause.dispatch('click');frames(100);assert.equal(createdRun.time,before);
   await elements.resume.dispatch('click');frames(10);assert(createdRun.time>before);
   await window.dispatch('keydown',{code:'Space'});assert(createdRun.player.held);await window.dispatch('keyup',{code:'Space'});assert(!createdRun.player.held);
   await elements['pause-menu'].dispatch('click');startsFail=true;await elements['wallet-form'].dispatch('submit');assert.match(elements['wallet-status'].textContent,/offline/);assert(!elements['verify-button'].disabled,'failed start allows retry');
-  let selected;window.RushOnline.prepare=async()=>ticket;window.RushOnline.setWallet=address=>{selected=address;};
+  let selected;elements.wallet.value=security.MINT;ticket.wallet=security.MINT;window.RushOnline.prepare=async()=>ticket;window.RushOnline.setWallet=address=>{selected=address;};
   await elements['wallet-form'].dispatch('submit');assert.equal(selected,security.MINT);assert.equal(elements['mode-label'].textContent,'DAILY RUN');
   await elements['pause-menu'].dispatch('click');
   await elements['wallet-form'].dispatch('submit');assert(frame);
@@ -360,7 +368,89 @@ test('large obstacles slow the rider, consume collisions once and allow clean ju
   assert(!jumped.drainEvents().some(event=>event.type==='stumble'));
 });
 
-test('midair flip sounds start before landing, each full turn emits once, and held bad flips remain fatal',()=>{
+test('three distinct obstacle hits end a run; overlapping objects and RUSH cannot drain extra lives',()=>{
+  const run=new Run(7);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;
+  run.items=[];run.ramps=[];run.gaps=[];run.rails=[];run.nextFeature=run.nextScenery=Infinity;
+  Object.assign(run.player,{x:0,y:200,speed:400,vx:400,angle:0,boost:0,grounded:true});
+  const hit=()=>{const item={type:'rock',x:run.player.x,y:200};run.stumble(item);return item;};
+  assert.equal(run.lives,3);const first=hit();assert.equal(run.lives,2);assert(!run.dead);
+  run.stumble(first);hit();assert.equal(run.lives,2,'the same rock and overlapping hitboxes share recovery');
+  advance(run,151);hit();assert.equal(run.lives,1);assert(!run.dead);
+  advance(run,151);hit();assert.equal(run.lives,0);assert(run.dead);assert.equal(run.reason,'OUT OF LIVES');
+  assert.equal(run.drainEvents().filter(e=>e.lifeLost).length,3);hit();assert.equal(run.lives,0);
+  const shield=new Run(9);shield.player.rush=7;shield.player.invulnerable=0;
+  shield.stumble({type:'rock',x:0,y:shield.player.y});assert.equal(shield.lives,3,'RUSH protects lives even at a timer boundary');
+});
+
+test('rare green hearts restore exactly one life, cap at three and never sit on ground hazards or gaps',()=>{
+  const run=new Run(7);run.terrain=()=>200;run.derivative=()=>0;run.slope=()=>0;
+  run.ramps=[];run.gaps=[];run.rails=[];run.nextFeature=run.nextScenery=Infinity;
+  Object.assign(run.player,{x:0,y:200,speed:400,vx:400,angle:0,boost:0,grounded:true});
+  run.lives=1;
+  for(const expected of [2,3,3]){
+    run.items=[{type:'heart',x:run.player.x+3,y:183}];run.step(1/120);
+    assert.equal(run.lives,expected);assert.equal(run.items.length,0,'a collected heart cannot be reused');
+  }
+  assert.equal(run.heartsCollected,2);assert.equal(run.drainEvents().filter(e=>e.type==='heart').length,2);
+  const positions=new Set();
+  for(let seed=1;seed<=40;seed++){
+    const route=new Run(seed);route.generate(110000);const hearts=route.items.filter(i=>i.type==='heart');
+    assert(hearts.length>=4&&hearts.length<=8,'hearts are rare, including in long runs');
+    assert(hearts[0].x>8000,'no life farming in the safe introduction');
+    for(let i=0;i<hearts.length;i++){
+      assert(!route.gapAt(hearts[i].x));
+      assert(!route.items.some(v=>route.touchesGroundHazard(v)&&Math.abs(v.x-hearts[i].x)<80));
+      if(i)assert(hearts[i].x-hearts[i-1].x>13000,'health pickups stay far apart');
+    }
+    positions.add(hearts.map(v=>Math.round(v.x)).join(','));
+  }
+  assert.equal(positions.size,40,'each seed changes the recovery opportunities');
+});
+
+test('long flats vary the hill rhythm and high balloon chains have reachable launches and clear cables',()=>{
+  let flats=0,steepUphill=false,steepDownhill=false,chains=0;
+  for(let seed=1;seed<=24;seed++){
+    const route=new Run(seed);route.generate(40000);let flatLength=0;
+    for(let x=3000;x<40000;x+=20){
+      const slope=route.derivative(x);steepUphill||=slope<-.85;steepDownhill||=slope>1.1;
+      if(Math.abs(slope)<.065){flatLength+=20;if(flatLength===600)flats++;}else flatLength=0;
+    }
+    const first=route.rails.find(rail=>rail.high);assert(first,'each sampled long route includes balloon chains');
+    const wires=route.rails.filter(rail=>rail.chain===first.chain),ramp=route.ramps.find(r=>r.end===first.x-65);
+    assert(wires.length>=2&&ramp);chains++;
+    for(const wire of wires)for(let x=wire.x;x<wire.end;x+=16)assert(route.railY(wire,x)<route.terrain(x)-50);
+    let reachable=false;
+    for(const offset of [Infinity,250,180,110,50,0]){
+      const run=new Run(seed);run.generate(40000);run.items=[];run.gaps=[];run.nextFeature=run.nextScenery=Infinity;
+      Object.assign(run.player,{x:ramp.x-120,y:run.terrain(ramp.x-120),speed:470,vx:470,boost:0,grounded:true});
+      let tapped=false;
+      for(let tick=0;tick<2400&&!run.dead&&run.player.x<wires[wires.length-1].end+100;tick++){
+        if(offset!==Infinity&&!tapped&&run.player.x>=ramp.end-offset){run.press();run.release();tapped=true;}
+        run.step(1/120);run.drainEvents();
+        if(run.player.rail?.chain===first.chain){reachable=true;break;}
+      }
+      if(reachable)break;
+    }
+    assert(reachable,'a timed launch can reach seed '+seed+' sky route');
+  }
+  assert(chains===24&&flats>=20&&steepUphill&&steepDownhill);
+});
+
+test('high-jump cameras keep Catoshi in frame and play-area CSS suppresses iPhone selection',()=>{
+  const {Renderer}=require('./renderer.js');
+  for(const [width,height] of [[960,540],[600,960]])for(const altitude of [300,900,1800]){
+    const run=new Run(1);run.items=[];run.nextFeature=run.nextScenery=Infinity;
+    Object.assign(run.player,{x:500,y:run.terrain(500)-altitude,speed:600,grounded:false});
+    const renderer=new Renderer({canvas:{width,height}},{});renderer.reset(run);
+    for(let frame=0;frame<240;frame++)renderer.update(run,1/60);
+    const screenY=(run.player.y-renderer.camera.y)*renderer.camera.zoom;
+    assert(screenY>height*.25&&screenY<height*.68,'hero stays visible at '+altitude+' altitude');
+  }
+  const css=fs.readFileSync(path.join(__dirname,'styles.css'),'utf8');
+  assert.match(css,/#game-screen,#game-screen \*\{[^}]*-webkit-user-select:none;user-select:none;[^}]*-webkit-touch-callout:none;[^}]*-webkit-tap-highlight-color:transparent/);
+});
+
+test('midair flip sounds emit once per turn and mistimed flips spend one life without banking bonuses',()=>{
   const run=new Run(5);run.items=[];run.nextFeature=run.nextScenery=Infinity;run.gaps=[];run.rails=[];run.ramps=[];
   run.terrain=()=>5000;run.derivative=()=>0;run.slope=()=>0;
   Object.assign(run.player,{grounded:false,x:0,y:0,vx:400,vy:-20,speed:400,coyote:0});
@@ -369,7 +459,13 @@ test('midair flip sounds start before landing, each full turn emits once, and he
   assert.equal(events.filter(event=>event.type==='flip-start').length,1);
   assert.equal(events.filter(event=>event.type==='flip').length,1);
   assert(!events.some(event=>event.type==='land'||event.type==='trick'),'airborne sounds do not award landing points');
-  Object.assign(run.player,{held:true,angle:Math.PI});run.land(5000,0);assert(run.dead);assert.equal(run.reason,'CRASH LANDING');
+  Object.assign(run.player,{held:true,angle:Math.PI});run.land(5000,0);assert(!run.dead);assert.equal(run.lives,2);
+  const impact=run.drainEvents();assert(impact.some(e=>e.lifeLost&&e.kind==='flip'));
+  assert(!impact.some(e=>/BACKFLIP/.test(e.text||'')),'a bad flip cannot bank points');
+  for(let i=0;i<2;i++){
+    Object.assign(run.player,{held:true,angle:Math.PI,airborne:1,invulnerable:0,recovery:0});run.land(5000,0);
+  }
+  assert(run.dead);assert.equal(run.reason,'OUT OF LIVES');assert.equal(run.lives,0);
   const crash=run.drainEvents().find(event=>event.type==='crash');assert(Number.isFinite(crash.x)&&Number.isFinite(crash.y));
 });
 
@@ -707,4 +803,57 @@ test('compact lobby keeps unfunded prizes at $0 and leaderboard renders safe nam
  assert.equal(h.elements['board-holder']['aria-pressed'],'true');assert.match(h.elements['leaderboard-status'].className,/board-live/);
  h.setEntries([]);await h.elements['board-refresh'].dispatch('click');assert.match(h.elements['leaderboard-rows'].children[0].children[0].textContent,/No runs yet/);
  h.fail();await h.elements['board-refresh'].dispatch('click');assert.equal(h.elements['leaderboard-status'].className,'status error');
+});
+
+test('wallet-free scored runs keep private browser progress and never accept a payout address at finish',async t=>{
+ let clock=Date.UTC(2026,9,2,1),rpcCalls=0;const config={...configFromEnv(),database:':memory:'};
+ const app=createApp(config,{now:()=>clock,balance:async()=>{rpcCalls++;throw Error('RPC unavailable');}});
+ await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));const base='http://127.0.0.1:'+app.server.address().port;config.origin=base;
+ t.after(async()=>{await new Promise(resolve=>app.server.close(resolve));app.db.close();});
+ const cookies=new Map();
+ async function request(route,data,jar='first'){
+  const res=await fetch(base+route,{method:data?'POST':'GET',headers:{...(data?{'content-type':'application/json',origin:base}:{}),...(cookies.has(jar)?{cookie:cookies.get(jar)}:{})},body:data?JSON.stringify(data):undefined});
+  if(res.headers.get('set-cookie'))cookies.set(jar,res.headers.get('set-cookie').split(';')[0]);return {status:res.status,value:await res.json()};
+ }
+ const initial=(await request('/api/player-status')).value;assert.equal(initial.quota.used,0);assert.equal(initial.wallet,null);assert.equal(initial.prizeEligible,false);
+ const rules=(await request('/api/config')).value;assert(rules.walletOptional);
+ assert.equal((await request('/api/runs/start',{name:'Cat',wallet:'bad',engine:security.ENGINE_VERSION})).status,400);
+ let firstResult;
+ for(const [index,jar]of ['first','first','second'].entries()){
+  const started=await request('/api/runs/start',{name:'Guest Cat '+index,...(index===1?{wallet:'   '}:{}) ,engine:security.ENGINE_VERSION},jar);
+  assert.equal(started.status,200);const ticket=started.value;assert.equal(ticket.wallet,null);assert.equal(ticket.prizeEligible,false);
+  const simulated=simulate(ticket.seed);clock+=simulated.ticks/120*1000+2000;
+  const ended=await request('/api/runs/finish',{id:ticket.id,ticks:simulated.ticks,inputs:simulated.inputs,wallet:security.MINT},jar);
+  assert.equal(ended.status,200);assert.equal(ended.value.run.wallet,null);assert.equal(ended.value.prizeEligible,false);assert(ended.value.best);
+  assert.equal(app.db.prepare('SELECT wallet FROM runs WHERE id=?').get(ticket.id).wallet,null,'finish cannot turn a guest run into a prize entry');
+  if(index===0){firstResult=ended.value;assert.equal((await request('/api/runs/finish',{id:ticket.id},'second')).status,404);}
+ }
+ const first=(await request('/api/player-status',undefined,'first')).value,second=(await request('/api/player-status?wallet=',undefined,'second')).value;
+ assert.equal(first.quota.used,2);assert.equal(second.quota.used,1);assert.equal(first.history.length,2);assert.equal(second.history.length,1);
+ assert(first.history.every(run=>run.name!=='Guest Cat 2'));assert(second.history.every(run=>run.name==='Guest Cat 2'));
+ const board=(await request('/api/leaderboard')).value;assert.equal(board.entries.length,2,'only the best guest run per browser is shown');
+ assert(board.entries.every(run=>run.wallet===null&&!Object.hasOwn(run,'session')));assert.equal(rpcCalls,0);
+ assert.equal((await request('/api/runs/finish',{id:firstResult.run.id})).value.duplicate,true);
+ clock=(Math.floor(clock/ROUND_MS)+1)*ROUND_MS+1;const reset=(await request('/api/player-status')).value;
+ assert.equal(reset.quota.used,0);assert.equal(reset.quest.collected,0);assert.equal(reset.best,null);
+});
+
+test('guest daily quest is isolated, reviewable and excluded from token payout plans',async()=>{
+ const db=openDatabase(':memory:');const {dailyQuest,syncHolderScores}=require('./quest.cjs');
+ const {disqualify}=require('./admin.cjs'),{ensureRound,makeTop10Plan}=require('./rewards.cjs');
+ const config=configFromEnv({VAULT_WALLET:'11111111111111111111111111111111',REWARDS_ENABLED:'true',CATOSHI_PRIZE_POOL:'100000'});
+ try{
+  ensureRound(db,5,config,ROUND_MS);
+  const insert=db.prepare("INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine,score,raw_score,red_tokens,submitted)VALUES(?,?,1,'Cat',?,'holder',5,0,100000,?,?,?, ?,1)");
+  insert.run('guest-best','one',null,security.ENGINE_VERSION,3000,3000,5);
+  insert.run('guest-next','one',null,security.ENGINE_VERSION,2000,2000,5);
+  insert.run('other','two',null,security.ENGINE_VERSION,500,500,5);
+  insert.run('wallet','three',security.MINT,security.ENGINE_VERSION,1000,1000,0);
+  assert(syncHolderScores(db,null,5,'one').unlocked);assert.equal(dailyQuest(db,null,5,'two').collected,5);
+  assert.equal(dailyQuest(db,security.MINT,5).collected,0);assert.equal(db.prepare("SELECT score FROM runs WHERE id='guest-best'").get().score,6000);
+  assert.throws(()=>dailyQuest(db,null,5),/browser session/,'a missing identity must never merge all guests');
+  disqualify(db,'guest-next','Invalidated collected tokens');assert.equal(db.prepare("SELECT score FROM runs WHERE id='guest-best'").get().score,3000);
+  const plan=await makeTop10Plan(db,5,config,{now:()=>6*ROUND_MS+GRACE_MS+1,balance:async()=>({raw:1000000n,decimals:0})});
+  const payments=db.prepare('SELECT wallet,run_id FROM reward_payments').all();assert.equal(payments.length,1);assert.equal(payments[0].wallet,security.MINT);assert.equal(payments[0].run_id,'wallet');assert(plan);
+ }finally{db.close();}
 });

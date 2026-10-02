@@ -9,9 +9,9 @@
   let music=null,musicPriming=false,playing=false,coinSequence=0;
   let anchor=null,anchorPriming=false,anchorAttempt=0;
   const active=new Set(),pending=[],voices=[];
-  const clips={burst:'burst',coin:'coin',jump:'jump','flip-start':'flip',flip:'flip',land:'land',crash:'crash',rush:'rush',redRush:'red'};
+  const clips={burst:'burst',coin:'coin',jump:'jump','flip-start':'flip',flip:'flip',land:'land',crash:'crash',rush:'rush',redRush:'red',heart:'red'};
   function mediaClip(event){
-    if(event.type==='stumble')return ['metal','wood','stone'].includes(event.material)?event.material:'stone';
+    if(event.type==='stumble')return event.fatal?null:['metal','wood','stone'].includes(event.material)?event.material:'stone';
     if(event.type==='trick')return /BACKFLIP/.test(event.text)?'red':event.text==='RUSH BOOST'?'rush':event.text==='CABLE GRIND'?'flip':null;
     return clips[event.type]||null;
   }
@@ -59,7 +59,7 @@
     const voice=bank.find(voice=>voice.audio.paused||voice.audio.ended)||bank.reduce((a,b)=>a.serial<b.serial?a:b);
     const audio=voice.audio,serial=++voice.serial;
     try{
-      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?coinLevel:1);
+      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?coinLevel:event.type==='heart'?.45:1);
       audio.playbackRate=event.type==='coin'?1+(coinSequence++%5)*.025:1;
       Promise.resolve(audio.play()).then(()=>{
         if(voice.serial===serial&&(!playing||document.hidden))audio.pause();
@@ -222,6 +222,8 @@
     else if(event.type==='rush'){
       noise(.3,.12,1800);tone(180,780,.38,.18,0,'triangle');
       [660,880,1320].forEach((pitch,i)=>tone(pitch,pitch,.18,.13,i*.07,'sine'));
+    }else if(event.type==='heart'){
+      tone(523,659,.15,.10,0,'sine');tone(784,784,.18,.09,.07,'sine');
     }else if(event.type==='redRush'){
       [880,1174,1760].forEach((pitch,i)=>tone(pitch,pitch*1.015,.2,.12,i*.075,'sine'));
     }

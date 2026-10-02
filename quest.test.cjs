@@ -26,7 +26,7 @@ test('gold RUSH grants exactly seven simulation seconds of speed and full gamepl
  assert(run.player.rush<1e-9,'time does not extend beyond seven seconds');
  run.step(1/120);assert.equal(run.player.rush,0);
  for(let n=0;n<150;n++)run.step(1/120);assert(run.player.speed<=760,'burst speed eases back to ordinary speed');
- Object.assign(run.player,{airborne:1,held:true,angle:Math.PI,vy:1800,vx:400});run.land(200,0);assert(run.dead,'ordinary landing risks resume');
+ Object.assign(run.player,{airborne:1,held:true,angle:Math.PI,vy:1800,vx:400});run.land(200,0);assert(!run.dead);assert.equal(run.lives,2,'ordinary landing damage resumes after the shield');
  const limited=flat();limited.player.rush=7;limited.crash('TIME LIMIT');assert(limited.dead,'power cannot bypass server run duration');
 });
 test('each seed creates only five increasingly distant red routes; red pickups cap at five per run',()=>{

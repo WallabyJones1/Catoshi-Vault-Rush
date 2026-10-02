@@ -96,7 +96,8 @@ test('leaderboard publishes one best completed run per holder wallet, preserving
 
 test('completed native red pickups accumulate once across ten runs, unlock the best score and reset with daily history',async t=>{
  const h=await harness(t,{durable:true});
- const inputs=[[685,1],[685,0],[1629,1],[1629,0],[1890,1],[1890,0],[2754,1],[2754,0],[2901,1],[2901,0],[3119,1],[3119,0],[3448,1],[3448,0],[4017,1],[4017,0]];
+ // A completed native v10 run earns both pickups before its third obstacle hit.
+ const inputs=[[709,1],[709,0],[1662,1],[1662,0],[1972,1],[1972,0]];
  const run=new Run(1);let ticks=0,cursor=0;
  while(!run.dead&&ticks<MAX_TICKS){while(cursor<inputs.length&&inputs[cursor][0]===ticks){inputs[cursor++][1]?run.press():run.release();}run.step(1/120);run.drainEvents();ticks++;}
  assert.equal(run.redTokens,1);assert.equal(run.rushPickups,1);assert(run.dead);const rawScore=Math.floor(run.score),results=[];

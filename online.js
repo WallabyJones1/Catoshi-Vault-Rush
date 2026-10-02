@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-9';
+  const ENGINE='flow-web-10';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
@@ -61,7 +61,6 @@
   }
   function updateStatus(value){updateQuota(value.quota);updateBest(value.best);updateDaily(value);}
   async function refreshQuota(){
-    if(!entryWallet)return;
     const address=entryWallet;
     try{const value=await api('player-status?'+new URLSearchParams({wallet:address}));if(address===entryWallet){updateStatus(value);}}catch{}
   }
@@ -86,7 +85,7 @@
     $('again').disabled=false;$('again').textContent='RIDE AGAIN';
     const displayName=$('holder-name').value.trim()||'Runner',rewardWallet=entryWallet;
     await getConfig();
-    const ticket=await api('runs/start',{name:displayName,mode:'holder',engine:ENGINE,wallet:rewardWallet});
+    const ticket=await api('runs/start',{name:displayName,mode:'holder',engine:ENGINE,...(rewardWallet?{wallet:rewardWallet}:{})});
     rememberHolderName(rewardWallet,displayName);updateStatus(ticket);
     return ticket;
   }
@@ -155,7 +154,7 @@
         cell.colSpan=4;cell.className='board-empty';cell.textContent='No runs yet. Set the first score.';row.appendChild(cell);body.appendChild(row);}
       $('leaderboard-status').className='status board-live';
       $('leaderboard-status').textContent='LIVE · '+new Date(value.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
-      $('leaderboard-explainer').textContent='BEST RUN PER WALLET · '+(round===null?'TODAY':'YESTERDAY');
+      $('leaderboard-explainer').textContent='BEST RUN PER PLAYER · '+(round===null?'TODAY':'YESTERDAY');
       const remaining=Math.max(0,(value.round+1)*86400000-value.updatedAt);
       $('board-round-time').textContent=round!==null?'CLOSED · UTC'
         :'RESETS '+Math.floor(remaining/3600000)+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · UTC';

@@ -77,9 +77,9 @@
       if(operation!==startId)return;
       const onlineTicket=await window.RushOnline.prepare();
       if (operation !== startId) return;
-      if(!onlineTicket?.id||!onlineTicket.wallet||!Number.isInteger(onlineTicket.seed))throw new Error('Could not reserve your run. Please retry.');
+      if(!onlineTicket?.id||!Number.isInteger(onlineTicket.seed))throw new Error('Could not reserve your run. Please retry.');
       setRunTicket(onlineTicket);
-      if(onlineTicket?.wallet)wallet=onlineTicket.wallet;
+      wallet=onlineTicket.wallet||'';
       ui['mode-label'].textContent='DAILY RUN';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = new VaultRush.Run(onlineTicket.seed); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
@@ -105,6 +105,10 @@
     $('rush-meter').value=run.player.rush;
     ui.distance.textContent = Math.floor(run.player.x / 10) + 'm';
     ui.score.textContent = String(Math.floor(run.score)).padStart(6,'0');
+    const lives=$('lives');
+    lives.setAttribute('aria-label',run.lives+' of '+run.maxLives+' lives');
+    lives.classList.toggle('last-life',run.lives===1);
+    for(let i=1;i<=run.maxLives;i++)$('life-'+i).classList.toggle('empty',i>run.lives);
     ui.speed.textContent = Math.round(run.player.speed * .1);
     ui.warning.hidden = !(run.dog.active && run.dog.warning);
   }
@@ -126,8 +130,12 @@
         ui.trick.classList.add('visible');trickTime=1.8;
       }
       if(event.type==='stumble'){
-        ui.trick.textContent='BUMP · KEEP MOVING';
+        ui.trick.textContent=event.lifeLost?(event.fatal?'OUT OF LIVES':event.lives+' '+(event.lives===1?'LIFE':'LIVES')+' LEFT'):'BUMP · KEEP MOVING';
         ui.trick.classList.add('visible');trickTime=.8;
+      }
+      if(event.type==='heart'){
+        ui.trick.textContent='+1 LIFE';
+        ui.trick.classList.add('visible');trickTime=1.3;
       }
       if (event.type === 'crash') { phase = 'crashed'; resultDelay = .85; releaseInput(); }
     }
@@ -143,7 +151,9 @@
     $('run-pickups').textContent=run.redTokens+' RED RUSH · '+run.rushPickups+' SPEED BURST'+(run.rushPickups===1?'':'S');
     ui['result-kicker'].textContent = 'DAILY RUN';
     ui['result-reason'].textContent = run.reason || 'RUN ENDED';
-    ui['result-copy'].textContent = 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Enabled prizes are reviewed and paid by the team.';
+    ui['result-copy'].textContent = wallet
+      ? 'Reward address '+wallet.slice(0,4)+'…'+wallet.slice(-4)+'. Enabled prizes are reviewed and paid by the team.'
+      : 'Add a rewards wallet before your next run to enter token prizes.';
     ui['submission-status']=$('submission-status');
     $('share-status').textContent='';
     window.RushOnline.share(run,null);
@@ -231,6 +241,11 @@
   window.addEventListener('pointerup',event => {
     if (event.pointerId === inputPointer) { inputPointer = null; if (!keyHeld) releaseHeld(); }
   });
+  // Safari can select labels during a long jump/flip press. Block selection
+  // only in the play area; name and optional wallet fields keep normal editing.
+  const playArea=$('game-screen');
+  playArea.addEventListener('selectstart',event=>event.preventDefault());
+  playArea.addEventListener('contextmenu',event=>event.preventDefault());
   window.addEventListener('keydown',event => {
     const editing = ['INPUT','TEXTAREA'].includes(event.target?.tagName) || event.target?.isContentEditable;
     if (editing || phase === 'menu' || phase === 'result' || phase === 'loading') return;
@@ -250,9 +265,9 @@
     event.preventDefault();
     if(phase!=='menu'||ui['verify-button'].disabled)return;
     const address = $('wallet').value.trim();
-    if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) { status('That does not look like a Solana wallet.','error'); return; }
+    if (address && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(address)) { status('That does not look like a Solana wallet. Leave it blank to play without one.','error'); return; }
     const request = ++walletRequest;
-    ui['verify-button'].disabled = true; status('Starting your free prize run…');
+    ui['verify-button'].disabled = true; status('Starting your run…');
     try {
       if (request !== walletRequest || phase !== 'menu') return;
       wallet=address;window.RushOnline.setWallet(address);

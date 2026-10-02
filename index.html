@@ -7,14 +7,14 @@
   <meta name="description" content="Catoshi Vault Rush — endless downhill token surfing.">
   <title>Catoshi · Vault Rush</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0908'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23e8a13a'/%3E%3Cpath d='m17 6-7 12h6l-1 8 8-13h-6z' fill='%23f2efe9'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=web-9-ui-3">
-  <script defer src="engine.js?v=web-9-ui-3"></script>
-  <script defer src="renderer.js?v=web-9-ui-3"></script>
-  <script defer src="audio-config.js?v=web-9-ui-3"></script>
-  <script defer src="sound.js?v=web-9-ui-3"></script>
-  <script defer src="home.js?v=web-9-ui-3"></script>
-  <script defer src="online.js?v=web-9-ui-3"></script>
-  <script defer src="game.js?v=web-9-ui-3"></script>
+  <link rel="stylesheet" href="styles.css?v=web-10-lives-terrain-1">
+  <script defer src="engine.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="renderer.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="audio-config.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="sound.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="home.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="online.js?v=web-10-lives-terrain-1"></script>
+  <script defer src="game.js?v=web-10-lives-terrain-1"></script>
 </head>
 <body>
   <main id="app">
@@ -28,9 +28,8 @@
           <p class="entry-meta">FREE PLAY <span>·</span> UNLIMITED RUNS</p>
           <p id="holder-best" class="practice-note"></p>
           <form id="wallet-form">
-            <label for="wallet">REWARDS WALLET</label>
-            <input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste wallet address" required>
             <div class="player-field holder-name-field"><label for="holder-name">LEADERBOARD NAME <span>OPTIONAL</span></label><input id="holder-name" minlength="2" maxlength="20" autocomplete="nickname" placeholder="Your name"></div>
+            <div class="player-field"><label for="wallet">SOLANA REWARDS WALLET <span>OPTIONAL</span></label><input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="For token prizes · optional"></div>
             <button id="verify-button" class="primary" type="submit">PLAY</button>
           </form>
           <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
@@ -53,7 +52,7 @@
           <canvas id="game" width="960" height="540" tabindex="0" aria-label="Tap or press space to jump; hold while airborne to backflip; release before landing."></canvas>
           <div class="hud">
             <div class="hud-pickups"><div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div><span class="red-count" aria-label="Red RUSH this run"><i aria-hidden="true"></i><span id="run-red">0 / 5</span></span></div>
-            <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span></div>
+            <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span><div id="lives" class="lives" role="img" aria-label="3 of 3 lives"><i id="life-1" aria-hidden="true"></i><i id="life-2" aria-hidden="true"></i><i id="life-3" aria-hidden="true"></i></div></div>
           </div>
           <div id="rush-burst" class="rush-burst" hidden><strong>RUSH · SHIELDED</strong><span id="rush-time">7.0s</span><progress id="rush-meter" max="7" value="7" aria-label="RUSH burst remaining"></progress></div>
           <p id="mode-label" class="mode-label">DAILY RUN</p>
@@ -100,10 +99,10 @@
     <section id="leaderboard-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" hidden>
       <div class="board-card">
         <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="leaderboard-title">LEADERBOARD</h2></div><button id="close-leaderboard" class="ghost" type="button" aria-label="Close leaderboard">×</button></div>
-        <div class="board-prize-line"><span>TOP 10 <small>PRIZE PLACES</small></span><small>BEST RUN COUNTS</small></div>
+        <div class="board-prize-line"><span>TOP 10 <small>DAILY RANKINGS</small></span><small>BEST RUN COUNTS</small></div>
         <div class="board-tabs"><button id="board-holder" type="button">TODAY</button><button id="board-previous" type="button">YESTERDAY</button></div>
         <div class="board-toolbar"><p id="board-round-time" class="practice-note"></p><button id="board-refresh" class="ghost" type="button">REFRESH</button></div>
-        <p id="leaderboard-explainer" class="practice-note">BEST RUN PER WALLET</p>
+        <p id="leaderboard-explainer" class="practice-note">BEST RUN PER PLAYER</p>
         <table class="rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">SCORE</th><th scope="col">DISTANCE</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>
         <p id="leaderboard-status" class="status" role="status">Loading rankings…</p>
       </div>

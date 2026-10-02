@@ -1,9 +1,8 @@
 'use strict';
 const crypto = require('node:crypto');
-const { Run } = require('./engine.js');
+const { Run, VERSION:ENGINE_VERSION } = require('./engine.js');
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const MINT = 'HrZh7koZFedTSHng4bVmhULwejpmVdSKUYxaf2N5im1b';
-const ENGINE_VERSION = 'flow-web-9';
 const MAX_TICKS = 120 * 600;
 const MAX_INPUTS = 3000;
 class HttpError extends Error { constructor(status,message){super(message);this.status=status;} }
