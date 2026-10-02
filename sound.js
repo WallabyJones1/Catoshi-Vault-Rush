@@ -2,7 +2,7 @@
   'use strict';
   const settings=window.RushAudioConfig||{},enabled=settings.enabled!==false;
   const volume=value=>Math.max(0,Math.min(1,Number(value)||0));
-  const coinLevel=volume(settings.coinVolume??.45);
+  const coinLevel=volume(settings.coinVolume??.05);
   const now=()=>typeof performance!=='undefined'?performance.now():Date.now();
   const mobile=typeof navigator!=='undefined'&&(navigator.maxTouchPoints>0||/iPhone|iPad|iPod|Android/i.test(navigator.userAgent||''));
   let context=null,master=null,noiseBuffer=null,samples={},resumePromise=null,resumeAttempt=0;

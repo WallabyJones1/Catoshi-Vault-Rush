@@ -561,7 +561,7 @@ test('audible blast and every coin start immediately, resume and stop with play 
   assert.equal(ctx.sources.filter(source=>source.buffer===blast).length,1);
   const chimes=ctx.sources.filter(source=>source.buffer===coin);assert.equal(chimes.length,3,'rapid pickups are not dropped');
   assert(chimes.every(source=>source.at===ctx.currentTime),'no per-coin delay or cumulative scheduling backlog');
-  assert(chimes.every(source=>source.output.gain.value===.45),'coin mix is quiet without delaying playback');
+  assert(chimes.every(source=>source.output.gain.value===.05),'coin mix stays at 5% without delaying playback');
   assert.equal(ctx.sources.find(source=>source.buffer===blast).output.gain.value,1,'other sounds keep their level');
   h.finishMusic();await Promise.resolve();assert.equal(h.music.pauses,0);
   ctx.state='interrupted';sound.effect({type:'coin'});assert.equal(ctx.resumes,2);ctx.wake();await Promise.resolve();
@@ -707,7 +707,7 @@ test('fallback clips preload once and replay immediately without changing source
  for(const kind of ['burst','jump','flip','crash','rush','redRush'])sound.effect({type:kind});
  assert.equal(voices.filter(voice=>voice.src==='sfx-coin-v1.wav').reduce((sum,voice)=>sum+voice.history.filter(src=>src==='sfx-coin-v1.wav').length,0),8,'fallback coin calls happen synchronously');
  assert.deepEqual(voices.map(voice=>({src:voice.src,loads:voice.loads})),initial,'events do not reload or switch media files');
- assert(voices.filter(v=>v.src==='sfx-coin-v1.wav').every(v=>v.volume===.72*.45),'fallback coins use the same quieter mix');
+ assert(voices.filter(v=>v.src==='sfx-coin-v1.wav').every(v=>v.volume===.72*.05),'fallback coins use the same 5% mix');
  assert.equal(voices.find(v=>v.src==='sfx-burst-v1.wav').volume,.72,'fallback blast stays unchanged');
  sound.setPlaying(false);assert(voices.every(voice=>voice.paused));
 });
