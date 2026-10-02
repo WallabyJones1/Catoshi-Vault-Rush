@@ -46,7 +46,7 @@ See **[REWARDS_SETUP.md](REWARDS_SETUP.md)** for the short setup and payment gui
 
 Catoshi mint: `HrZh7koZFedTSHng4bVmhULwejpmVdSKUYxaf2N5im1b`.
 
-The homepage displays the vault's actual Catoshi balance, plus its RUSH balance when a mint is configured. It refreshes every 30 seconds while the page is visible. Failed balance reads display unavailable rather than zero. Depositing into the vault does not automatically pledge its entire balance; the daily pools are separate fixed budgets.
+The top-right homepage banner displays `$0` until both a vault address and enabled rewards are configured. Once active, it shows the configured daily pool in CATOSHI and optional RUSH units, not an invented dollar valuation. Public vault balance data remains available through the treasury API, but the homepage no longer shows a separate balance/settings card.
 
 Each UTC day's best **ten distinct reward wallets** share both enabled token pools after team review. One wallet can occupy one prize position. The same percentage split applies independently to each token. If fewer than ten eligible wallets finish, their shares are normalized to distribute the full pools; if nobody finishes, no payment plan is created. Ranking ties use the earlier submission, then run ID.
 
@@ -123,7 +123,7 @@ The homepage uses a transparent, native animated image assembled from the approv
 
 ## Verification and limits
 
-The local suite passes **45 tests** covering gameplay, ramps, audible audio samples, mobile controls, RPC validation/failover, pasted-address entry without RPCs, unlimited starts, durable migrations, run history, server-verified quest totals, duplicate submissions, UTC resets, bonus movement/removal and reviewed top-ten payouts. Landing checks cover high released-input falls onto uphill, flat and downhill ground, one rough impact, recoverable obstacles, held bad flips, and replay consistency. Audio checks cover immediate overlapping coin dispatch, cached mobile playback, preloaded fallback voices, interrupted-context recovery without stale backlogs, pause/visibility, configuration disablement, and distinct gameplay cues.
+The local suite passes **46 tests** covering gameplay, ramps, audible audio samples, mobile controls, RPC validation/failover, pasted-address entry without RPCs, unlimited starts, durable migrations, run history, server-verified quest totals, duplicate submissions, UTC resets, bonus movement/removal and reviewed top-ten payouts. Landing checks cover high released-input falls onto uphill, flat and downhill ground, one rough impact, recoverable obstacles, held bad flips, and replay consistency. Audio checks cover immediate overlapping coin dispatch, cached mobile playback, preloaded fallback voices, interrupted-context recovery without stale backlogs, pause/visibility, configuration disablement, and distinct gameplay cues.
 
 Sampled no-input routes still fail without making obstacle hits immediately fatal. Timed taps can clear early obstacles, and optional gold/red routes are checked with varied approach speeds. A native input recording collects a red token and a gold burst before a genuine missed-gap failure. These are sampled checks, not proof of every seed or strategy. Audio checks validate PCM WAV energy/format and scheduling, but actual device/speaker latency on a physical iPhone has not been measured here.
 
@@ -133,3 +133,10 @@ Replay checks prevent simple fabricated scores; they do not establish human play
 
 
 This release checks the one-button start flow, failure/retry, input/pause/resume, all served homepage media, native-loop frame counts and fallback/reduced-motion handling. The local browser download was unavailable, so this release was checked with Node DOM/audio harnesses and native image decoding, not a real browser or physical phone. No live deployment was inspected or modified.
+
+
+## Compact lobby and leaderboard polish
+
+The homepage keeps the animated hero, a short tagline, one rewards-wallet/name form and PLAY. Power-up explanations, repeated eligibility/reset text, name help and vault setup messaging are removed. My Day/history is collapsed until opened with My Progress. The full-width header puts the prize pool at the top right, initially `$0`.
+
+Today/Yesterday standings use restrained gold podium badges, clearer names, orange scores, subtle row cards and a live indicator. On phones, distance moves below the name so the table needs no horizontal scrolling. Empty and network-error states remain explicit. Daily ranking, quests, payout configuration, gameplay and audio rules are unchanged.

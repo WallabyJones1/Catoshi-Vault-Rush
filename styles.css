@@ -63,3 +63,67 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 .gate-card{margin-top:auto;margin-bottom:auto}
 @media(min-width:601px){.menu-controls{align-self:flex-start;width:min(100%,400px)}}
 @media(orientation:landscape) and (max-height:600px){#gate{align-items:flex-start}.gate-card{margin-top:0}}
+
+/* Compact lobby banner and restrained daily standings. */
+.home-banner{width:100%;max-width:1200px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:18px}
+.home-banner .eyebrow{margin:0}
+.prize-banner{max-width:65%;text-align:right;border-right:2px solid var(--gold);padding:3px 12px 3px 0}
+.prize-banner span{display:block;font:9px/1.4 var(--mono);color:var(--grey);letter-spacing:.1em}
+.prize-banner strong{display:block;font:24px/1.25 var(--mono);color:var(--gold);margin-top:4px;overflow-wrap:anywhere}
+#holder-entry{margin-top:20px;padding-top:18px}
+.entry-meta{font:10px/1.4 var(--mono);letter-spacing:.09em;color:var(--grey);margin:0 0 20px}
+.entry-meta span{margin:0 7px;color:var(--orange)}
+#wallet-form>label{font:12px var(--condensed);letter-spacing:.08em;color:var(--cream)}
+#verify-button{margin-top:5px;min-height:54px}
+#holder-best{font:11px/1.6 var(--mono);color:var(--gold)}
+#holder-best:empty{display:none}
+#check-day{border:0;color:var(--grey);font:12px var(--mono);letter-spacing:.05em;min-height:44px;margin-top:4px}
+.quest-card summary{margin:0;font-size:14px}.daily-run-count{font:11px var(--mono);color:var(--grey);margin:18px 0}
+.quest-card .quest-heading{margin-top:16px}
+.leaderboard-panel{background:linear-gradient(160deg,#18130f 0%,#0a0908 45%);padding:32px 24px 40px}
+.board-card{max-width:680px}
+.board-heading{align-items:center}
+.board-heading .eyebrow{font-size:11px;letter-spacing:.16em;margin-bottom:9px}
+.board-heading h2{font-size:clamp(32px,6vw,52px);letter-spacing:.025em}
+.board-heading .ghost{border-radius:50%;width:40px;min-width:40px;min-height:40px;padding:0;font-size:25px;color:var(--grey)}
+.board-prize-line{display:flex;justify-content:space-between;align-items:center;gap:12px;border-bottom:1px solid var(--line);padding:24px 0 18px;font:18px var(--condensed);letter-spacing:.06em;color:var(--gold)}
+.board-prize-line small{font:9px var(--mono);color:var(--grey);letter-spacing:.05em}
+.board-prize-line span small{margin-left:7px;color:var(--cream)}
+.board-tabs{display:inline-flex;gap:4px;border:1px solid var(--line);padding:4px;border-radius:6px;margin:20px 0 12px;background:rgba(0,0,0,.2)}
+.board-tabs button{border:0;border-radius:3px;font:12px var(--condensed);letter-spacing:.08em;min-height:36px;min-width:90px;padding:8px 14px;color:var(--grey)}
+.board-tabs button[aria-pressed=true]{background:var(--orange);color:var(--black)}
+.board-toolbar{margin:0 0 8px}
+.board-toolbar .ghost{border:0;color:var(--grey);font:10px var(--mono);padding-right:0;min-height:40px}
+#leaderboard-explainer{font:9px var(--mono);letter-spacing:.05em;margin:0 0 12px}
+.rankings{border-collapse:separate;border-spacing:0 6px;table-layout:fixed}
+.rankings th{padding:10px 12px;border:0;font-size:9px;letter-spacing:.08em}
+.rankings th:first-child{width:58px}.rankings th:nth-child(2){width:40%}.rankings th:nth-child(3){width:30%}
+.rankings td{background:rgba(242,239,233,.025);border:0;padding:14px 12px;vertical-align:middle}
+.rankings td:first-child{border-radius:5px 0 0 5px}.rankings td:last-child{border-radius:0 5px 5px 0}
+.rankings .prize-position td{background:rgba(232,161,58,.035)}
+.rankings .podium-row td{background:rgba(232,161,58,.065)}
+.rankings .podium-1 td{background:rgba(232,161,58,.095)}
+.rank-badge{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;font:12px var(--mono);color:var(--grey);border:1px solid var(--line)}
+.podium-row .rank-badge{border-color:rgba(232,161,58,.4);color:var(--gold)}
+.podium-1 .rank-badge{background:var(--gold);color:var(--black);border-color:var(--gold)}
+.rank-name{display:block;font:14px/1.3 system-ui,sans-serif;color:var(--cream);font-weight:600;overflow-wrap:anywhere}
+.rank-detail{display:flex;gap:8px;align-items:center;margin-top:5px;min-height:12px}
+.rank-wallet{margin:0;font:9px var(--mono);color:var(--grey)}
+.rank-mobile-distance{display:none;font:9px var(--mono);color:var(--grey)}
+.rankings td:nth-child(3){font-size:17px;overflow-wrap:anywhere;line-height:1.4}
+.rankings td:nth-child(4){font-size:11px;color:var(--grey)}
+.rankings td.board-empty{padding:44px 20px;border-radius:5px;text-align:center;font:13px system-ui,sans-serif;color:var(--grey)}
+.bonus-badge{font-size:9px;margin-left:4px;padding:2px 4px;border-radius:3px;background:rgba(232,161,58,.1)}
+#leaderboard-status{font:10px var(--mono);letter-spacing:.03em;margin-top:14px}
+.board-live::before{content:'';display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--green);margin:0 7px 1px 0}
+@media(max-width:600px){
+ .home-banner{margin-bottom:14px}.prize-banner strong{font-size:21px}.prize-banner span{font-size:8px}
+ .brand-lockup{min-height:132px}.lede{font-size:14px;margin:12px 0 18px}
+ .leaderboard-panel{padding:26px 16px 32px}.board-heading h2{font-size:32px}
+ .rankings th:first-child{width:42px}.rankings th:nth-child(2){width:auto}.rankings th:nth-child(3){width:34%}
+ .rankings th:nth-child(4),.rankings td:nth-child(4){display:none}
+ .rankings th,.rankings td{padding:12px 9px}.rankings td:nth-child(3){border-radius:0 5px 5px 0;font-size:15px}
+ .rankings td:first-child{padding-left:8px;padding-right:4px}.rank-badge{width:25px;height:25px;font-size:11px}
+ .rank-name{font-size:13px}.rank-wallet,.rank-mobile-distance{font-size:8px}.rank-mobile-distance{display:inline}
+ .rank-detail{flex-wrap:wrap;gap:5px}.rankings td.board-empty{display:table-cell;text-align:center}
+}

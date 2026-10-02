@@ -10,7 +10,7 @@
 | `RUSH_MINT` | The actual Solana mint address of $RUSH |
 | `RUSH_PRIZE_POOL` | Your chosen daily RUSH token amount, e.g. `10000` |
 
-Only `VAULT_WALLET` is needed to show the Catoshi vault balance on the homepage. You can show the balance while rewards are off. Configure `RUSH_MINT` to also show the RUSH balance. For Catoshi-only prizes, leave the RUSH pool at `0`; no RUSH mint is required then. The app will reject enabling a positive RUSH pool without its mint.
+The homepage prize banner stays at `$0` until `VAULT_WALLET` is set and `REWARDS_ENABLED=true`. It then shows the configured daily CATOSHI and optional RUSH pools in token units. The `/api/vault` endpoint still reports treasury balances; the compact homepage does not show a separate vault-balance card. For Catoshi-only prizes, leave the RUSH pool at `0`; no RUSH mint is required then. The app will reject enabling a positive RUSH pool without its mint.
 
 Use a wallet you control and fund it with the announced token budgets. It needs SOL for transfers you sign. Paste the **public wallet address**, never a private key or seed phrase. Redeploy after changing service variables. Keep `NODE_ENV=production`, the persistent `/data` volume, and `DATABASE_PATH=/data/catoshi.sqlite`. `PUBLIC_ORIGIN` can be omitted on Railway; if retained, use the exact current HTTPS origin without a trailing slash.
 

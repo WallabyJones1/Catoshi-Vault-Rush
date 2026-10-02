@@ -213,7 +213,7 @@ test('RPC failover and exact balances never grant entry on failed or malformed r
 
 test('one free play mode requires a reserved run and remembers wallet names without connecting',async()=>{
   const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
-  assert(!html.includes('CONNECT &amp; SIGN'));assert(html.includes('reward address'));
+  assert(!html.includes('CONNECT &amp; SIGN'));assert(html.includes('REWARDS WALLET'));
   const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element(m[1])]));
   const document=new Element('document'),window=new Element('window');document.getElementById=id=>{assert(elements[id],id);return elements[id];};
   let startsFail=true;const requests=[];
@@ -226,8 +226,9 @@ test('one free play mode requires a reserved run and remembers wallet names with
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,localStorage:{getItem:key=>storedNames.get(key),setItem:(key,value)=>storedNames.set(key,value)},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},location:{protocol:'file:'},URLSearchParams,console});
   window.RushOnline.setWallet(security.MINT);
   await assert.rejects(window.RushOnline.prepare(),/Unavailable/,'failed scored start never becomes an untracked local run');
-  assert.equal(elements['vault-balance'].textContent,'1,234,567.89');
   assert.equal(elements['prize-pool'].textContent,'100,000 CATOSHI + 50 RUSH');
+  assert(!requests.some(([url])=>url.endsWith('/vault')),'the clean homepage does not require a vault balance RPC');
+  assert(!elements['quest-rule']&&!elements['vault-status'],'homepage explanations are removed');
   elements['holder-name'].value='Wallaby';
   startsFail=false;window.RushOnline.setWallet(security.MINT);
   const holder=await window.RushOnline.prepare();assert.equal(holder.wallet,security.MINT);
@@ -676,4 +677,34 @@ test('homepage uses a bundled native ten-frame loop without canvas or animation 
  const cachedFailure=setup(false,true);assert.equal(cachedFailure.hero.src,'catoshi-home-v2.gif');
  const accessible=setup(true);assert.equal(accessible.hero.src,'catoshi-home-still-v2.png');
  accessible.preference.matches=false;accessible.preference.change();assert.equal(accessible.hero.src,'catoshi-home-v2.webp');
+});
+
+test('compact lobby keeps unfunded prizes at $0 and leaderboard renders safe names, ranks and empty/error states',async()=>{
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+ class Node extends Element{
+  constructor(id){super(id);this.children=[];}
+  set textContent(value){this.text=value;this.children=[];}get textContent(){return this.text;}
+  appendChild(child){this.children.push(child);}setAttribute(key,value){this[key]=value;}
+ }
+ const setup=(vault,prizesEnabled)=>{
+  const elements=Object.fromEntries([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Node(m[1])]));
+  const document=new Node('document'),window=new Node('window');
+  document.getElementById=id=>{assert(elements[id],id);return elements[id];};document.createElement=tag=>new Node(tag);
+  let entries=[{rank:1,name:'<Cat>',wallet:'Abcd…Wxyz',score:2345,distance:900,pointsMultiplier:2}],failed=false;
+  const config={engine:security.ENGINE_VERSION,vault,prizesEnabled,round:Math.floor(Date.now()/86400000),rewards:{catoshiPool:'100000',rushPool:'0'}};
+  const fetcher=async url=>({ok:!failed,json:async()=>failed?{error:'Offline'}:url.endsWith('config')?config:{entries,round:config.round,updatedAt:Date.now()}});
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{window,document,fetch:fetcher,location:{protocol:'file:'},localStorage:{getItem(){},setItem(){}},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},URLSearchParams});
+  return {elements,client:window.RushOnline,setEntries:value=>{entries=value;},fail:()=>{failed=true;}};
+ };
+ for(const [vault,enabled]of [['',true],[security.MINT,false]]){
+  const h=setup(vault,enabled);await h.client.getConfig();assert.equal(h.elements['prize-pool'].textContent,'$0');
+ }
+ const h=setup(security.MINT,true);await h.client.getConfig();assert.equal(h.elements['prize-pool'].textContent,'100,000 CATOSHI');
+ await h.elements['leaderboard-button'].dispatch('click');await new Promise(setImmediate);
+ const row=h.elements['leaderboard-rows'].children[0];assert.equal(row.children.length,4);
+ assert.equal(row.children[0].children[0].textContent,1);assert.equal(row.children[1].children[0].textContent,'<Cat>');
+ assert.equal(row.children[2].textContent,'2,345');assert.equal(row.children[2].children[0].textContent,'2×');
+ assert.equal(h.elements['board-holder']['aria-pressed'],'true');assert.match(h.elements['leaderboard-status'].className,/board-live/);
+ h.setEntries([]);await h.elements['board-refresh'].dispatch('click');assert.match(h.elements['leaderboard-rows'].children[0].children[0].textContent,/No runs yet/);
+ h.fail();await h.elements['board-refresh'].dispatch('click');assert.equal(h.elements['leaderboard-status'].className,'status error');
 });

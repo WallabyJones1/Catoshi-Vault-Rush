@@ -22,16 +22,11 @@
       if(value.engine!==ENGINE||(typeof VaultRush!=='undefined'&&VaultRush.VERSION!==ENGINE))throw Error('Please reload to get the current game version.');
       config=value;
       const rewards=value.rewards;
-      $('vault-status').textContent=value.vault
-        ?'Vault '+value.vault.slice(0,4)+'…'+value.vault.slice(-4)+' · '+(value.prizesEnabled?'rewards enabled · team payout review':'rewards off')
-        :'Team vault not configured · rewards off';
-      const pool=rewards?tokenText(rewards.catoshiPool)+' CATOSHI'+(Number(rewards.rushPool)>0?' + '+tokenText(rewards.rushPool)+' RUSH':''):value.jackpotTokens+' CATOSHI';
-      $('prize-pool').textContent=value.prizesEnabled?pool:'REWARDS OFF';
-      $('reward-rule').textContent=value.prizesEnabled
-        ?'Daily top 10 wallets · '+(rewards?.split||[30,20,12,10,8,6,5,4,3,2]).join(' / ')+'% · team reviews payouts'
-        :'Free play for everyone · daily prizes can be enabled by the team';
-      refreshVault();
-      if(!vaultTimer)vaultTimer=setInterval(()=>{if(!document.hidden){refreshVault();refreshQuota();}},30000);
+      // Until a funded prize configuration is connected, show the requested
+      // $0 placeholder. Real pools retain their token units, never fake USD.
+      const pool=rewards?tokenText(rewards.catoshiPool)+' CATOSHI'+(Number(rewards.rushPool)>0?' + '+tokenText(rewards.rushPool)+' RUSH':''):tokenText(value.jackpotTokens)+' CATOSHI';
+      $('prize-pool').textContent=value.vault&&value.prizesEnabled?pool:'$0';
+      if(!vaultTimer)vaultTimer=setInterval(()=>{if(!document.hidden)refreshQuota();},30000);
       return value;
     }).catch(error=>{configPromise=null;throw error;});
     return configPromise;
@@ -42,7 +37,7 @@
   }
   function updateQuota(quota){
     if(!quota)return;
-    $('holder-runs').textContent=quota.used+' RUN'+(quota.used===1?'':'S')+' TODAY · UNLIMITED PLAYS · BEST SCORE COUNTS';
+    $('holder-runs').textContent=quota.used+' RUN'+(quota.used===1?'':'S')+' TODAY';
     $('again').disabled=false;$('again').textContent='RIDE AGAIN';
   }
   function updateBest(best){
@@ -54,8 +49,6 @@
     $('holder-daily').hidden=false;$('holder-daily').classList.toggle('unlocked',quest.unlocked);
     $('quest-count').textContent=quest.collected+' / '+quest.target+(quest.unlocked?' · 2×':'');
     $('quest-progress').value=Math.min(quest.target,quest.collected);
-    $('quest-rule').textContent=quest.unlocked?'2× unlocked for your best run today. A better raw score inherits the bonus. Resets at 00:00 UTC.'
-      :'Collect '+quest.remaining+' more red RUSH today to double your best run. Up to 5 per run on distant routes. Only completed, checked runs count. Resets at 00:00 UTC.';
     const history=$('daily-history');history.textContent='';
     for(const [index,run]of (value.history||[]).entries()){
       const li=document.createElement('li'),line=document.createElement('div'),label=document.createElement('span'),score=document.createElement('strong'),detail=document.createElement('small');
@@ -72,16 +65,6 @@
     const address=entryWallet;
     try{const value=await api('player-status?'+new URLSearchParams({wallet:address}));if(address===entryWallet){updateStatus(value);}}catch{}
   }
-  async function refreshVault(){
-    try{
-      const value=await api('vault',null,12000);
-      if(!value.configured){$('vault-balance').textContent='—';$('rush-balance').textContent='';return;}
-      const cat=value.assets?.find(asset=>asset.symbol==='CATOSHI');
-      $('vault-balance').textContent=cat?.available||value.tokens!==null&&value.tokens!==undefined?tokenText(cat?.tokens??value.tokens):'UNAVAILABLE';
-      const rush=value.assets?.find(asset=>asset.symbol==='RUSH');
-      $('rush-balance').textContent=rush?'RUSH in vault: '+(rush.available?tokenText(rush.tokens):'unavailable'):'';
-    }catch{ $('vault-balance').textContent='UNAVAILABLE';$('rush-balance').textContent='Vault balance could not refresh'; }
-  }
   let suggestedHolderName='';
   function restoreHolderName(address=$('wallet').value.trim()){
     const field=$('holder-name');
@@ -95,7 +78,7 @@
     try{localStorage.setItem('rush-holder-name:'+address,value);}catch{}
     $('holder-name').value=value;suggestedHolderName=value;
   }
-  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='UNLIMITED PLAYS · BEST SCORE COUNTS';updateBest(null);$('holder-daily').hidden=true;}});
+  $('wallet').addEventListener('input',()=>{restoreHolderName();if($('wallet').value.trim()!==entryWallet){$('holder-runs').textContent='0 RUNS TODAY';updateBest(null);$('holder-daily').hidden=true;}});
   $('wallet').addEventListener('change',()=>restoreHolderName());
   restoreHolderName();
   async function prepare(){
@@ -154,22 +137,29 @@
       for(const entry of value.entries){
         const row=document.createElement('tr');
         if(entry.rank<=10)row.className='prize-position';
+        if(entry.rank<=3)row.classList.add('podium-row','podium-'+entry.rank);
         for(const [index,field]of [entry.rank,entry.name,entry.score.toLocaleString(),entry.distance+'m'].entries()){
-          const cell=document.createElement('td');cell.textContent=field;
+          const cell=document.createElement('td');
+          if(index===0){const badge=document.createElement('span');badge.className='rank-badge';badge.textContent=field;cell.appendChild(badge);}
+          else if(index===1){const name=document.createElement('strong');name.className='rank-name';name.textContent=field;cell.appendChild(name);}
+          else cell.textContent=field;
           if(index===2&&entry.pointsMultiplier===2){const badge=document.createElement('small');badge.className='bonus-badge';badge.textContent='2×';cell.appendChild(badge);}
-          if(index===1&&entry.wallet){const address=document.createElement('small');address.className='rank-wallet';address.textContent=entry.wallet;cell.appendChild(address);}
+          if(index===1){const detail=document.createElement('small');detail.className='rank-detail';
+            if(entry.wallet){const address=document.createElement('span');address.className='rank-wallet';address.textContent=entry.wallet;detail.appendChild(address);}
+            const distance=document.createElement('span');distance.className='rank-mobile-distance';distance.textContent=entry.distance+'m';detail.appendChild(distance);cell.appendChild(detail);}
           row.appendChild(cell);
         }
         body.appendChild(row);
       }
-      $('leaderboard-status').textContent=value.entries.length
-        ?'Updated '+new Date(value.updatedAt).toLocaleTimeString()+' · best run per player'
-        :'No scores yet. Be the first to finish a run.';
-      $('leaderboard-explainer').textContent=(round===null?'Today (UTC)':'Yesterday (UTC)')+' · unlimited plays per wallet · best score counts · collect 10 red RUSH for 2× · top 10 share enabled prizes after team review.';
+      if(!value.entries.length){const row=document.createElement('tr'),cell=document.createElement('td');
+        cell.colSpan=4;cell.className='board-empty';cell.textContent='No runs yet. Set the first score.';row.appendChild(cell);body.appendChild(row);}
+      $('leaderboard-status').className='status board-live';
+      $('leaderboard-status').textContent='LIVE · '+new Date(value.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+      $('leaderboard-explainer').textContent='BEST RUN PER WALLET · '+(round===null?'TODAY':'YESTERDAY');
       const remaining=Math.max(0,(value.round+1)*86400000-value.updatedAt);
-      $('board-round-time').textContent=round!==null?'PREVIOUS UTC DAY · CLOSED'
-        :'RESETS IN '+Math.floor(remaining/3600000)+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · UTC';
-    }catch(error){if(generation===boardGeneration)$('leaderboard-status').textContent='Could not refresh rankings. '+error.message+' Use Refresh to retry.';}
+      $('board-round-time').textContent=round!==null?'CLOSED · UTC'
+        :'RESETS '+Math.floor(remaining/3600000)+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · UTC';
+    }catch(error){if(generation===boardGeneration){$('leaderboard-status').className='status error';$('leaderboard-status').textContent='Could not refresh. '+error.message;}}
   }
   function openBoard(){
     previousFocus=document.activeElement;$('leaderboard-panel').hidden=false;$('close-leaderboard').focus();board();
@@ -205,7 +195,7 @@
     try{
       const value=await api('player-status?'+new URLSearchParams({wallet:address}),null,15000);
       if($('wallet').value.trim()!==address)return;
-      entryWallet=address;restoreHolderName(address);updateStatus(value);
+      entryWallet=address;restoreHolderName(address);updateStatus(value);$('holder-daily').open=true;
       $('wallet-status').textContent='Daily progress loaded · no run used.';$('wallet-status').className='status success';
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}

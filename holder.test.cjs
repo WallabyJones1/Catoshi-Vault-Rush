@@ -134,7 +134,7 @@ test('daily progress loads without spending a run and renders history, quest and
  vm.runInNewContext(fs.readFileSync(path.join(__dirname,'online.js'),'utf8'),{document,window,location:{protocol:'file:'},localStorage:{getItem(){return null;},setItem(){}},fetch:async route=>{requests.push(route);return {ok:true,json:async()=>({...status,eligible:true,tokens:'50000'})};},AbortController,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},URLSearchParams,console});
  await get('check-day').listeners.click();
  assert.deepEqual(requests,['/api/player-status?wallet='+WALLET]);assert.equal(window.RushOnline.wallet(),WALLET);
- assert.match(get('holder-runs').textContent,/UNLIMITED PLAYS/);assert.equal(get('again').disabled,false);
+ assert.equal(get('holder-runs').textContent,'4 RUNS TODAY');assert.equal(get('holder-daily').open,true);assert.equal(get('again').disabled,false);
  assert.equal(get('quest-count').textContent,'10 / 10 · 2×');assert.equal(get('quest-progress').value,10);assert.equal(get('holder-daily').hidden,false);
  assert.equal(get('daily-history').children.length,2);assert.match(get('holder-best').textContent,/2× QUEST/);
  assert.match(get('daily-history').children[0].children[1].textContent,/<Cat> · 1000m · 2 red/,'names are rendered literally, never as HTML');

@@ -7,54 +7,42 @@
   <meta name="description" content="Catoshi Vault Rush — endless downhill token surfing.">
   <title>Catoshi · Vault Rush</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0908'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23e8a13a'/%3E%3Cpath d='m17 6-7 12h6l-1 8 8-13h-6z' fill='%23f2efe9'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="styles.css?v=web-9-launch-2">
-  <script defer src="engine.js?v=web-9-launch-2"></script>
-  <script defer src="renderer.js?v=web-9-launch-2"></script>
-  <script defer src="audio-config.js?v=web-9-launch-2"></script>
-  <script defer src="sound.js?v=web-9-launch-2"></script>
-  <script defer src="home.js?v=web-9-launch-2"></script>
-  <script defer src="online.js?v=web-9-launch-2"></script>
-  <script defer src="game.js?v=web-9-launch-2"></script>
+  <link rel="stylesheet" href="styles.css?v=web-9-ui-3">
+  <script defer src="engine.js?v=web-9-ui-3"></script>
+  <script defer src="renderer.js?v=web-9-ui-3"></script>
+  <script defer src="audio-config.js?v=web-9-ui-3"></script>
+  <script defer src="sound.js?v=web-9-ui-3"></script>
+  <script defer src="home.js?v=web-9-ui-3"></script>
+  <script defer src="online.js?v=web-9-ui-3"></script>
+  <script defer src="game.js?v=web-9-ui-3"></script>
 </head>
 <body>
   <main id="app">
     <section id="gate" class="screen active" aria-labelledby="gate-title">
       <div class="gate-landscape" aria-hidden="true"></div>
+      <header class="home-banner"><p class="eyebrow">CATOSHI</p><div class="prize-banner" aria-label="Daily prize pool"><span>DAILY PRIZE POOL</span><strong id="prize-pool">$0</strong></div></header>
       <div class="gate-card">
-        <p class="eyebrow">CATOSHI</p>
         <div class="brand-lockup"><h1 id="gate-title">VAULT<br><span>RUSH</span></h1><img id="home-catoshi" src="catoshi-home-v2.webp" width="320" height="320" alt="Catoshi balancing, blinking and waving on her gold token" fetchpriority="high"></div>
         <p class="lede">Take the gold. Ride the hills.<br>Make the landing.</p>
-        <p class="pickup-note">GOLD RUSH · 7s shield &amp; speed <span>RED RUSH · daily 2× best score quest</span></p>
-        <p class="home-rule"><span>FREE FOR EVERYONE</span><span>UNLIMITED PLAYS</span><span>BEST RUN COUNTS</span></p>
-        <section class="vault-card" aria-label="Vault funding and daily prizes">
-          <div class="vault-total"><span>VAULT · CATOSHI</span><strong id="vault-balance">—</strong></div>
-          <p id="rush-balance" class="vault-rush"></p>
-          <div class="daily-pool"><span>DAILY PRIZE POOL</span><strong id="prize-pool">REWARDS OFF</strong></div>
-          <p id="reward-rule" class="practice-note">Free play for everyone · daily prizes can be enabled by the team</p>
-        </section>
         <section id="holder-entry" aria-label="Free entry">
-          <p class="practice-note">Paste your Solana rewards wallet. Play free as often as you like. The top 10 wallets share the daily prize pool. No token holdings or wallet connection needed.</p>
-          <p id="holder-runs" class="holder-runs" role="status">UNLIMITED PLAYS · BEST SCORE COUNTS</p>
+          <p class="entry-meta">FREE PLAY <span>·</span> UNLIMITED RUNS</p>
           <p id="holder-best" class="practice-note"></p>
-          <p class="practice-note">Daily leaderboard and red RUSH quest reset at 00:00 UTC.</p>
           <form id="wallet-form">
-            <label for="wallet">Solana wallet · reward address</label>
+            <label for="wallet">REWARDS WALLET</label>
             <input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Paste wallet address" required>
-            <div class="player-field holder-name-field"><label for="holder-name">LEADERBOARD NAME <span>PUBLIC WITH YOUR SCORE</span></label><input id="holder-name" minlength="2" maxlength="20" autocomplete="nickname" placeholder="Your name · optional" aria-describedby="holder-name-help"></div>
-            <p id="holder-name-help" class="practice-note">Remembered for this wallet on this device. Optional · 2–20 characters.</p>
+            <div class="player-field holder-name-field"><label for="holder-name">LEADERBOARD NAME <span>OPTIONAL</span></label><input id="holder-name" minlength="2" maxlength="20" autocomplete="nickname" placeholder="Your name"></div>
             <button id="verify-button" class="primary" type="submit">PLAY</button>
           </form>
           <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
           <button id="leaderboard-button" class="ghost" type="button">LIVE LEADERBOARD <span aria-hidden="true">↗</span></button>
-          <button id="check-day" class="ghost" type="button">MY DAILY PROGRESS</button>
-          <section id="holder-daily" class="quest-card" aria-label="Daily red RUSH quest and run history" hidden>
+          <button id="check-day" class="ghost" type="button">MY PROGRESS</button>
+          <details id="holder-daily" class="quest-card" aria-label="Daily red RUSH quest and run history" hidden><summary>MY DAY <span>UTC</span></summary>
+            <p id="holder-runs" class="daily-run-count">0 RUNS TODAY</p>
             <div class="quest-heading"><strong>RED RUSH QUEST</strong><span id="quest-count">0 / 10</span></div>
             <progress id="quest-progress" max="10" value="0" aria-label="Daily red RUSH collected"></progress>
-            <p id="quest-rule" class="practice-note">Collect 10 today to double your best run. Up to 5 per run, on distant routes. Only completed, checked runs count.</p>
             <details class="run-history"><summary>MY RUNS · TODAY <span>UTC</span></summary><ol id="daily-history"></ol><p id="history-empty" class="practice-note">Your completed runs will appear here.</p></details>
-          </section>
+          </details>
         </section>
-        <p id="vault-status" class="practice-note">Payout vault not configured · rewards not enabled</p>
       </div>
       <p class="menu-controls">TAP TO JUMP <span>·</span> HOLD IN AIR TO FLIP</p>
     </section>
@@ -111,10 +99,11 @@
     </section>
     <section id="leaderboard-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" hidden>
       <div class="board-card">
-        <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="leaderboard-title">THE LEADERBOARD</h2></div><button id="close-leaderboard" class="ghost" type="button" aria-label="Close leaderboard">×</button></div>
+        <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="leaderboard-title">LEADERBOARD</h2></div><button id="close-leaderboard" class="ghost" type="button" aria-label="Close leaderboard">×</button></div>
+        <div class="board-prize-line"><span>TOP 10 <small>PRIZE PLACES</small></span><small>BEST RUN COUNTS</small></div>
         <div class="board-tabs"><button id="board-holder" type="button">TODAY</button><button id="board-previous" type="button">YESTERDAY</button></div>
         <div class="board-toolbar"><p id="board-round-time" class="practice-note"></p><button id="board-refresh" class="ghost" type="button">REFRESH</button></div>
-        <p id="leaderboard-explainer" class="practice-note">Scores refresh every 10 seconds. Player names are public.</p>
+        <p id="leaderboard-explainer" class="practice-note">BEST RUN PER WALLET</p>
         <table class="rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">SCORE</th><th scope="col">DISTANCE</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>
         <p id="leaderboard-status" class="status" role="status">Loading rankings…</p>
       </div>
