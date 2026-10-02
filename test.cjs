@@ -112,7 +112,7 @@ test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard a
   const board=(await request('/api/leaderboard')).value;assert.equal(board.entries[0].name,'Cat Runner');assert(!Object.hasOwn(board.entries[0],'session'));
   assert.match((await request('/score/'+ticket.id)).value,/og:title/);
   for(const file of ['server.cjs','.env','security.cjs','test.cjs','data/catoshi.sqlite'])assert.equal((await request('/'+file)).res.status,404);
-  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','home.js','catoshi-home-loop-v1.png','catoshi-home-v2.webp','catoshi-home-v2.gif','catoshi-home-still-v2.png','rush-pickups-v2.png'])assert.equal((await request('/'+file)).res.status,200);
+  for(const file of ['engine.js','online.js','sound.js','audio-config.js','catoshi-coin.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','home.js','catoshi-home-loop-v1.png','catoshi-home-v2.webp','catoshi-home-v2.gif','catoshi-home-still-v2.png','rush-pickups-v2.png','catoshi-actions-extra-v1.png','sky-terrain-details-v1.png'])assert.equal((await request('/'+file)).res.status,200);
   const range=await fetch(base+'/music.mp3',{headers:{Range:'bytes=0-31'}});assert.equal(range.status,206);assert.equal(range.headers.get('content-length'),'32');assert.equal((await range.arrayBuffer()).byteLength,32);
   for(const kind of ['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red']){
     const response=await fetch(base+'/sfx-'+kind+'-v1.wav',{headers:{Range:'bytes=0-43'}});
@@ -895,4 +895,34 @@ test('guest daily quest is isolated, reviewable and excluded from token payout p
   const plan=await makeTop10Plan(db,5,config,{now:()=>6*ROUND_MS+GRACE_MS+1,balance:async()=>({raw:1000000n,decimals:0})});
   const payments=db.prepare('SELECT wallet,run_id FROM reward_payments').all();assert.equal(payments.length,1);assert.equal(payments[0].wallet,security.MINT);assert.equal(payments[0].run_id,'wallet');assert(plan);
  }finally{db.close();}
+});
+
+test('supplemental artwork failure preserves playable core assets',async()=>{
+  const {loadAssets,assets}=require('./renderer.js');
+  class Image {
+    set src(value){queueMicrotask(()=>value===assets.extras||value===assets.details?this.onerror():this.onload());}
+  }
+  const images=await loadAssets(Image);
+  assert(images.characters&&images.layers&&images.scenery);
+  assert.equal(images.extras,null);assert.equal(images.details,null);
+  class BrokenCore extends Image {
+    set src(value){queueMicrotask(()=>value===assets.characters?this.onerror():this.onload());}
+  }
+  await assert.rejects(loadAssets(BrokenCore),/Artwork could not load: characters/);
+});
+
+test('background and decoration rendering leave checked gameplay unchanged',()=>{
+  const {Renderer,assets}=require('./renderer.js');
+  const gradient={addColorStop(){}};
+  const context=new Proxy({canvas:{width:600,height:960},createLinearGradient:()=>gradient,createRadialGradient:()=>gradient},{get(target,key){return key in target?target[key]:()=>{};}});
+  const images=Object.fromEntries(Object.keys(assets).map(key=>[key,{width:2000,height:1200}]));
+  const a=new Run(77),b=new Run(77),renderer=new Renderer(context,images);
+  for(let tick=0;tick<1200&&!a.dead;tick++){
+    if(tick===340){a.press();b.press();}if(tick===355){a.release();b.release();}
+    a.step(1/120);b.step(1/120);
+    if(tick%4===0){renderer.update(a,1/30);renderer.draw(a);}
+    assert.deepEqual(a.drainEvents(),b.drainEvents());
+  }
+  assert.deepEqual(a.player,b.player);assert.deepEqual(a.items,b.items);
+  assert.equal(a.score,b.score);assert.equal(a.reason,b.reason);
 });

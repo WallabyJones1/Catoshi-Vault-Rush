@@ -1,0 +1,246 @@
+{
+  "version": "asset-polish-1",
+  "generatedWith": "Runway",
+  "date": "2026-10-02",
+  "transparency": "True RGBA. Uniform white production backdrops extracted by connected-edge matting after atlas segmentation omitted some sprites. Enclosed highlights preserved.",
+  "tasks": {
+    "character": "8747a32f-e795-4386-acd8-a964023e9385",
+    "environment": "8442ae37-dd18-4389-b859-cd443446bee5"
+  },
+  "atlases": [
+    {
+      "file": "catoshi-actions-extra-v1.png",
+      "width": 1536,
+      "height": 800,
+      "frames": [
+        {
+          "name": "ride-blink",
+          "crop": [
+            20,
+            75,
+            344,
+            305
+          ],
+          "sourceCell": 0,
+          "baseline": 380
+        },
+        {
+          "name": "ride-smile",
+          "crop": [
+            404,
+            75,
+            344,
+            305
+          ],
+          "sourceCell": 1,
+          "baseline": 380
+        },
+        {
+          "name": "speed-tuck",
+          "crop": [
+            788,
+            112,
+            344,
+            268
+          ],
+          "sourceCell": 2,
+          "baseline": 380
+        },
+        {
+          "name": "rail-balance",
+          "crop": [
+            1172,
+            35,
+            344,
+            345
+          ],
+          "sourceCell": 3,
+          "baseline": 380
+        },
+        {
+          "name": "airborne-joy",
+          "crop": [
+            42,
+            420,
+            300,
+            360
+          ],
+          "sourceCell": 4,
+          "baseline": 780
+        },
+        {
+          "name": "soft-landing",
+          "crop": [
+            404,
+            425,
+            344,
+            355
+          ],
+          "sourceCell": 5,
+          "baseline": 780
+        },
+        {
+          "name": "surprised-stumble",
+          "crop": [
+            788,
+            450,
+            344,
+            330
+          ],
+          "sourceCell": 6,
+          "baseline": 780
+        },
+        {
+          "name": "rush-grin",
+          "crop": [
+            1172,
+            457,
+            344,
+            323
+          ],
+          "sourceCell": 7,
+          "baseline": 780
+        }
+      ]
+    },
+    {
+      "file": "sky-terrain-details-v1.png",
+      "width": 1536,
+      "height": 1200,
+      "frames": [
+        {
+          "name": "wispy-cloud",
+          "crop": [
+            20,
+            279,
+            344,
+            101
+          ],
+          "sourceCell": 0,
+          "baseline": 380
+        },
+        {
+          "name": "puff-cloud",
+          "crop": [
+            404,
+            238,
+            344,
+            142
+          ],
+          "sourceCell": 1,
+          "baseline": 380
+        },
+        {
+          "name": "cloud-bank",
+          "crop": [
+            788,
+            238,
+            344,
+            142
+          ],
+          "sourceCell": 2,
+          "baseline": 380
+        },
+        {
+          "name": "wind-streak",
+          "crop": [
+            1172,
+            298,
+            344,
+            82
+          ],
+          "sourceCell": 3,
+          "baseline": 380
+        },
+        {
+          "name": "rock-cluster",
+          "crop": [
+            20,
+            586,
+            344,
+            194
+          ],
+          "sourceCell": 4,
+          "baseline": 780
+        },
+        {
+          "name": "sandstone-spires",
+          "crop": [
+            404,
+            541,
+            344,
+            239
+          ],
+          "sourceCell": 5,
+          "baseline": 780
+        },
+        {
+          "name": "desert-shrub",
+          "crop": [
+            788,
+            468,
+            344,
+            312
+          ],
+          "sourceCell": 6,
+          "baseline": 780
+        },
+        {
+          "name": "sandstone-arch",
+          "crop": [
+            1172,
+            652,
+            344,
+            128
+          ],
+          "sourceCell": 7,
+          "baseline": 780
+        },
+        {
+          "name": "pine-cluster",
+          "crop": [
+            32,
+            820,
+            319,
+            360
+          ],
+          "sourceCell": 8,
+          "baseline": 1180
+        },
+        {
+          "name": "basalt-ridge",
+          "crop": [
+            404,
+            997,
+            344,
+            183
+          ],
+          "sourceCell": 9,
+          "baseline": 1180
+        },
+        {
+          "name": "dune-grass",
+          "crop": [
+            788,
+            983,
+            344,
+            197
+          ],
+          "sourceCell": 10,
+          "baseline": 1180
+        },
+        {
+          "name": "ruin-columns",
+          "crop": [
+            1172,
+            941,
+            344,
+            239
+          ],
+          "sourceCell": 11,
+          "baseline": 1180
+        }
+      ]
+    }
+  ]
+}

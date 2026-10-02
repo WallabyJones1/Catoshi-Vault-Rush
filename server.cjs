@@ -22,6 +22,7 @@ const STATIC_FILES=new Map([
   ['music.mp3','audio/mpeg'],['music.ogg','audio/ogg'],['music.wav','audio/wav'],
   ['canyon-atmosphere.png','image/png'],['canyon-endless-layers.png','image/png'],
   ['terrain-biomes-v1.png','image/png'],['terrain-obstacles-v1.png','image/png'],
+  ['catoshi-actions-extra-v1.png','image/png'],['sky-terrain-details-v1.png','image/png'],
   ['catoshi-clean-actions.png','image/png'],['vault-scenery-atlas.png','image/png']
 ]);
 function openDatabase(filename) {
