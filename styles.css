@@ -142,3 +142,153 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 #home-catoshi-animation{position:absolute;inset:0;display:block;width:100%;height:100%;pointer-events:none}
 #home-catoshi-animation[hidden]{display:none}
 .home-mascot.animated #home-catoshi{opacity:0}
+
+
+/* Multiplayer race lobby, live standings and weekly racer board. */
+.multiplayer-cta{width:100%;margin-top:12px;background:linear-gradient(90deg,var(--orange),var(--gold));display:flex;justify-content:space-between;align-items:center;gap:12px}.multiplayer-cta span{font:10px var(--mono);letter-spacing:.06em;color:rgba(10,9,8,.72)}
+.multiplayer-card{max-width:720px}.multi-intro{font:11px/1.7 var(--mono);letter-spacing:.06em;color:var(--gold);margin:20px 0}.multi-join-card{padding:18px;border:1px solid var(--line);border-radius:6px;background:rgba(242,239,233,.025)}.multi-join-card label{font:12px var(--condensed);letter-spacing:.08em;color:var(--cream)}#multiplayer-quick{margin-top:12px}.multi-queue{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-top:14px;padding:12px;border-left:2px solid var(--orange);background:rgba(242,107,53,.06)}.multi-queue strong{font:18px var(--mono);color:var(--orange)}.multi-queue span{font:11px var(--mono);color:var(--grey);text-align:right}.multi-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:16px 0}.multi-stats div{padding:12px;background:rgba(242,239,233,.025);border:1px solid var(--line);border-radius:4px}.multi-stats small{display:block;font:9px var(--mono);color:var(--grey);margin-bottom:7px}.multi-stats strong{font:18px var(--mono);color:var(--cream)}.multi-rankings tr.you td{outline:1px solid rgba(242,107,53,.28);background:rgba(242,107,53,.06)}
+.race-standings{position:absolute;left:2.4%;top:28%;z-index:3;width:min(250px,36%);padding:10px 12px;background:rgba(10,9,8,.66);border-left:2px solid var(--orange);backdrop-filter:blur(3px);pointer-events:none}.race-standings-head{display:flex;justify-content:space-between;align-items:center;font:10px var(--mono);color:var(--grey);margin-bottom:7px}.race-standings-head strong{font-size:14px;color:var(--orange)}.race-standings ol{list-style:none;margin:0;padding:0;display:grid;gap:4px}.race-standings li{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:6px;align-items:center;font:9px var(--mono);color:var(--grey)}.race-standings li.you{color:var(--cream)}.race-standings .race-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.race-standings .race-distance{color:var(--gold)}
+@media(max-width:600px){.multi-stats{grid-template-columns:repeat(2,1fr)}.race-standings{top:31%;width:45%;padding:8px}.race-standings li{font-size:8px}.race-standings li:nth-child(n+6){display:none}.multiplayer-cta{font-size:18px}}
+
+/* Realtime multiplayer racing additions. */
+.color-picker{border:0;padding:0;margin:14px 0 4px}.color-picker legend{font:10px var(--mono);color:var(--grey);letter-spacing:.06em;margin-bottom:8px}.color-swatches{display:flex;flex-wrap:wrap;gap:8px}.color-swatch{width:30px!important;min-width:30px!important;height:30px!important;min-height:30px!important;padding:0!important;border:2px solid rgba(242,239,233,.18)!important;border-radius:50%!important;background:var(--racer-color)!important;box-shadow:0 0 0 2px transparent}.color-swatch[aria-checked=true]{box-shadow:0 0 0 2px var(--black),0 0 0 4px var(--cream);transform:scale(.92)}.track-note{font:9px/1.6 var(--mono);color:var(--grey);letter-spacing:.04em;margin:12px 0 4px}.race-ammo{font:10px var(--mono);color:var(--cream);border-left:1px solid var(--line);padding-left:8px;margin-left:7px}.race-ammo b{color:var(--orange);font-size:14px}.fire-control{border-color:rgba(244,197,66,.5)!important;color:var(--gold)!important}.replay-actions{display:flex;gap:10px;margin-top:10px}.replay-actions .share-link,.replay-actions .ghost{flex:1;width:auto;margin:0}.replay-page{min-height:100vh;background:radial-gradient(circle at 50% 0,#30231c 0,#0a0908 60%);color:var(--cream);padding:22px}.replay-shell{width:min(100%,980px);margin:0 auto}.replay-shell h1{font-size:clamp(34px,7vw,68px);margin:8px 0 16px}.replay-shell canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;border:1px solid var(--line);background:#111}.replay-toolbar{display:flex;gap:10px;margin-top:14px;flex-wrap:wrap}.replay-toolbar>*{flex:1;min-width:150px;margin:0}.replay-home{text-align:center;padding:14px}.replay-shell .status{margin-top:12px}.multi-join-card input{margin-bottom:4px}
+@media(max-width:600px){.control-strip:has(.fire-control:not([hidden])){display:grid;grid-template-columns:1fr .72fr;gap:8px}.control-strip:has(.fire-control:not([hidden])) p{grid-column:1/-1;max-width:none;text-align:center}.fire-control{min-width:0!important}.replay-actions{flex-direction:column}}
+
+/* Catoshi website lobby theme. Scoped so gameplay and race controls keep their sizing. */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;src:url('chakra-petch-600.woff2') format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;src:url('chakra-petch-700.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:400;font-display:swap;src:url('work-sans-400.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:500;font-display:swap;src:url('work-sans-500.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:600;font-display:swap;src:url('work-sans-600.woff2') format('woff2')}
+#gate{
+  --black:#080707;--orange:#f25e30;--cream:#eee8e8;--grey:#958787;
+  --line:#2b2121;--condensed:'Chakra Petch','Work Sans',system-ui,sans-serif;
+  --home-body:'Work Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --home-accent-hi:#f9a074;--home-sunken:#1b1515;
+  padding:24px 32px 32px;background:var(--black);color:var(--cream);
+  font:400 16px/1.6 var(--home-body);-webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;overscroll-behavior:contain;
+}
+#gate .gate-landscape{
+  position:fixed;background:radial-gradient(ellipse at 80% 40%,rgba(242,94,48,.13),transparent 60%);
+  opacity:1;pointer-events:none;
+}
+#gate .home-banner{
+  max-width:1116px;min-height:56px;margin:0 auto 42px;padding-bottom:16px;
+  border-bottom:1px solid var(--line);align-items:center;
+}
+#gate .wordmark{
+  margin:0;font:700 24px/1 var(--condensed);letter-spacing:-.01em;white-space:nowrap;
+}
+#gate .wordmark span{color:var(--orange);text-shadow:0 0 14px rgba(242,94,48,.55)}
+#gate .prize-banner{
+  padding:8px 14px;max-width:60%;border:1px solid rgba(242,94,48,.35);
+  border-radius:10px;background:rgba(242,94,48,.06);
+}
+#gate .prize-banner span{font:600 10px/1.4 var(--condensed);letter-spacing:.14em;color:var(--grey)}
+#gate .prize-banner strong{font:700 24px/1.1 var(--condensed);font-variant-numeric:tabular-nums;color:var(--home-accent-hi)}
+#gate .gate-card{
+  display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);
+  grid-template-rows:auto auto 1fr;column-gap:56px;align-items:start;
+  width:min(100%,1116px);margin:0 auto auto;padding:0;flex-shrink:0;
+}
+#gate .brand-lockup{
+  grid-column:1;grid-row:1;grid-template-columns:minmax(0,1fr) minmax(140px,44%);
+  gap:12px;align-items:center;min-height:248px;background:none;
+}
+#gate .brand-lockup h1{
+  font:700 clamp(48px,6.4vw,88px)/.95 var(--condensed);letter-spacing:.005em;
+  text-transform:uppercase;text-wrap:balance;
+}
+#gate .brand-lockup h1 span{color:var(--orange);text-shadow:0 0 28px rgba(242,94,48,.4)}
+#gate .home-mascot{width:100%;max-width:260px;justify-self:end;align-self:center}
+#gate .home-mascot #home-catoshi{width:100%;height:auto;max-width:none}
+#gate .lede{
+  grid-column:1;grid-row:2;margin:22px 0 0;color:var(--grey);
+  font:400 17px/1.6 var(--home-body);max-width:520px;
+}
+#gate #holder-entry{
+  grid-column:2;grid-row:1/4;margin:0;padding:24px;border-radius:16px;
+  border:1px solid rgba(242,94,48,.35);
+  background:linear-gradient(150deg,rgba(242,94,48,.12),rgba(242,94,48,.02) 55%),var(--home-sunken);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.35),0 0 50px rgba(242,94,48,.06);
+}
+#gate .entry-meta{
+  display:flex;align-items:center;gap:8px;font:600 11px/1.5 var(--condensed);
+  letter-spacing:.12em;color:var(--home-accent-hi);margin:0 0 24px;
+}
+#gate .entry-meta span{margin:0;color:var(--grey)}
+#gate .holder-name-field{margin-top:0}
+#gate .player-field{margin-bottom:18px}
+#gate .player-field label{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin-bottom:8px;font:600 12px/1.5 var(--condensed);letter-spacing:.08em;color:var(--cream);
+}
+#gate .player-field label span{float:none;font:500 10px/1.5 var(--home-body);letter-spacing:.04em;color:var(--grey)}
+#gate input{
+  border:1px solid var(--line);border-radius:10px;background:var(--black);
+  height:50px;padding:12px 14px;color:var(--cream);font:400 16px var(--home-body);
+}
+#gate #wallet{font:400 16px var(--mono)}
+#gate input::placeholder{color:#8b7f7f;opacity:1}
+#gate input:focus-visible,#gate button:focus-visible,#gate summary:focus-visible{
+  outline:2px solid var(--orange);outline-offset:3px;
+}
+#gate button{
+  font:600 14px/1.3 var(--condensed);letter-spacing:.06em;text-transform:uppercase;
+  min-height:50px;padding:14px 18px;border-radius:10px;
+  transition:filter .15s,border-color .15s,color .15s;
+}
+#gate #verify-button{
+  margin-top:4px;color:#fff;background-color:var(--orange);letter-spacing:.02em;
+  background-image:linear-gradient(rgba(255,255,255,0),rgba(255,255,255,.07));
+  text-shadow:0 1px 2.3px rgba(0,0,0,.18);
+  box-shadow:0 1px 2px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.2),inset 0 -1px rgba(255,255,255,.15),inset 0 -1px 5px rgba(255,255,255,.25),inset 0 1px rgba(255,255,255,.17);
+}
+#gate #verify-button:hover{filter:brightness(1.06)}
+#gate .ghost{background:transparent;border:1px solid var(--line);color:var(--cream)}
+#gate .ghost:hover{border-color:#8b7f7f;color:var(--home-accent-hi)}
+#gate .multiplayer-cta{
+  border:1px solid rgba(242,94,48,.6);background:rgba(242,94,48,.1);color:var(--cream);
+  box-shadow:0 0 18px rgba(242,94,48,.08);flex-wrap:wrap;gap:5px 10px;
+}
+#gate .multiplayer-cta:hover{border-color:var(--orange);background:rgba(242,94,48,.18)}
+#gate .multiplayer-cta span{color:var(--home-accent-hi);font:500 10px/1.5 var(--home-body)}
+#gate #leaderboard-button{padding-inline:18px}
+#gate #check-day{border:0;font:600 11px var(--condensed);color:var(--grey);min-height:44px;margin-top:6px}
+#gate .status,#gate .practice-note{font:400 13px/1.6 var(--home-body)}
+#gate .status.success{color:var(--green)}
+#gate .status.error{color:var(--red)}
+#gate .quest-card{border-radius:10px;border-color:var(--line);background:rgba(8,7,7,.55);padding:16px}
+#gate summary{font:600 12px/1.5 var(--condensed);letter-spacing:.08em}
+#gate .quest-heading{font:600 12px var(--condensed)}
+#gate .menu-controls{width:100%;max-width:1116px;align-self:center;margin:24px auto 0;font:500 11px var(--home-body);letter-spacing:.06em}
+@media(max-width:800px){
+  #gate{padding:20px 24px 28px}
+  #gate .home-banner{margin-bottom:24px}
+  #gate .gate-card{display:flex;flex-direction:column;width:min(100%,540px);margin:0 auto auto}
+  #gate .brand-lockup{width:100%;min-height:180px;grid-template-columns:minmax(0,1fr) minmax(130px,42%);gap:12px}
+  #gate .brand-lockup h1{font-size:clamp(50px,10vw,76px)}
+  #gate .home-mascot{max-width:220px}
+  #gate .lede{font-size:15px;line-height:1.6;margin:12px 0 24px}
+  #gate #holder-entry{width:100%;padding:22px}
+  #gate .menu-controls{max-width:540px}
+}
+@media(max-width:400px){
+  #gate{padding:16px 18px 24px}
+  #gate .wordmark{font-size:21px}
+  #gate .prize-banner{padding:7px 10px}
+  #gate .prize-banner span{font-size:8px}
+  #gate .prize-banner strong{font-size:21px}
+  #gate .brand-lockup{min-height:154px;grid-template-columns:minmax(0,1fr) minmax(110px,42%)}
+  #gate .brand-lockup h1{font-size:clamp(43px,12.5vw,50px)}
+  #gate #holder-entry{padding:18px}
+  #gate .entry-meta{font-size:10px;letter-spacing:.08em}
+}
+@media(orientation:landscape) and (max-height:600px) and (min-width:801px){
+  #gate .home-banner{margin-bottom:20px}
+  #gate .brand-lockup{min-height:180px}
+  #gate .brand-lockup h1{font-size:64px}
+  #gate .home-mascot{max-width:180px}
+}
+@media(prefers-reduced-motion:reduce){#gate button{transition:none}}

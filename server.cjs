@@ -9,12 +9,14 @@ const {dailyQuest,syncHolderScores,publicRun,playerFilter,RUN_FIELDS}=require('.
 const {checkReplay}=require('./replay-worker.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
+const {createMultiplayer}=require('./multiplayer.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['engine.js','text/javascript'],
-  ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],
+  ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>[font+'.woff2','font/woff2']),
+  ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],['multiplayer.js','text/javascript'],['race-tracks.js','text/javascript'],['race-engine.js','text/javascript'],['replay.js','text/javascript'],['replay.html','text/html; charset=utf-8'],
   ['sound.js','text/javascript'],['audio-config.js','text/javascript'],['catoshi-coin.png','image/png'],
   ['rush-pickups-v1.png','image/png'],['rush-pickups-v2.png','image/png'],['home.js','text/javascript'],['catoshi-home-loop-v1.png','image/png'],
   ['catoshi-home-v2.webp','image/webp'],['catoshi-home-v2.gif','image/gif'],['catoshi-home-still-v2.png','image/png'],
@@ -66,6 +68,7 @@ function configFromEnv(env=process.env) {
 }
 function createApp(config,options={}) {
   const db=options.db||openDatabase(config.database),now=options.now||Date.now;
+  const multiplayer=createMultiplayer(db,{now,engineVersion:ENGINE_VERSION,...(options.multiplayer||{})});
   const fetchBalance=(address,mint)=>options.assetBalance?options.assetBalance(address,mint):mint===MINT&&options.balance?options.balance(address):tokenBalance(address,[config.rpc,config.rpcFallback].filter(Boolean),undefined,mint);
   const balances=new Map();
   async function balance(address,mint=MINT){
@@ -95,9 +98,13 @@ function createApp(config,options={}) {
     if(++limit.count>max)throw new HttpError(429,'Too many requests. Please wait a minute.');
     if(limits.size>10000)throw new HttpError(503,'Please retry shortly.');
   }
+  function sessionFromRequest(req){
+    const cookie=req.headers.cookie?.match(/(?:^|;\s*)rush_session=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
+    return cookie?db.prepare('SELECT * FROM sessions WHERE id=? AND expires>?').get(hash(cookie),now()):null;
+  }
   function session(req,res){
     const cookie=req.headers.cookie?.match(/(?:^|;\s*)rush_session=([A-Za-z0-9_-]{43})(?:;|$)/)?.[1];
-    let record=cookie?db.prepare('SELECT * FROM sessions WHERE id=? AND expires>?').get(hash(cookie),now()):null;
+    let record=sessionFromRequest(req);
     let token=cookie;
     if(!record){
       token=crypto.randomBytes(32).toString('base64url');
@@ -179,7 +186,7 @@ function createApp(config,options={}) {
           const round=currentRound(now()),window=roundWindow(round);
           const snapshot=ensureRound(db,round,config);
           const rewards=publicRewards(snapshot,config);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false,multiplayer:{enabled:true,realtime:true,transport:'websocket',minPlayers:multiplayer.constants.MIN_PLAYERS,maxPlayers:multiplayer.constants.MAX_PLAYERS,raceSeconds:multiplayer.constants.RACE_SECONDS,countedRaces:multiplayer.constants.COUNTED_RACES,colors:multiplayer.constants.COLORS,tracks:multiplayer.profile(session(req,res).id).tracks}});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode='holder';
@@ -187,6 +194,24 @@ function createApp(config,options={}) {
           if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
           const window=roundWindow(round);
           json(res,{mode,round,period:window.period,roundStarts:window.start,roundEnds:window.end,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
+        }
+        if(req.method==='GET'&&url.pathname==='/api/multiplayer/state'){
+          const user=session(req,res),active=multiplayer.getActiveMatch(user.id);
+          rate(req,'multi-state',120,user.id);
+          json(res,{queued:Boolean(multiplayer.queueState(user.id)),queue:multiplayer.queueState(user.id),match:active?multiplayer.publicMatch(active.id,user.id):null,profile:multiplayer.profile(user.id)});return;
+        }
+        if(req.method==='GET'&&url.pathname==='/api/multiplayer/profile'){
+          const user=session(req,res);rate(req,'multi-profile',120,user.id);
+          json(res,multiplayer.profile(user.id));return;
+        }
+        if(req.method==='GET'&&url.pathname==='/api/multiplayer/leaderboard'){
+          const user=session(req,res);const raw=url.searchParams.get('round');let round=currentRound(now());
+          if(raw!==null){if(!/^\d{1,10}$/.test(raw))throw new HttpError(400,'Invalid round.');round=Number(raw);}
+          json(res,multiplayer.leaderboard(round,user.id));return;
+        }
+        if(req.method==='GET'&&url.pathname.startsWith('/api/replay/')){
+          const id=url.pathname.slice('/api/replay/'.length);if(!/^[A-Za-z0-9_-]{8,24}$/.test(id))throw new HttpError(404,'Replay not found.');
+          const replay=multiplayer.replay(id);if(!replay)throw new HttpError(404,'Replay not found.');json(res,replay);return;
         }
         if(req.method==='GET'&&['/api/player-status','/api/holder-status','/api/balance'].includes(url.pathname)){
           const raw=url.searchParams.get('wallet');
@@ -217,6 +242,10 @@ function createApp(config,options={}) {
           const address=rewardAddress(data.wallet);
           json(res,{...holderStatus(address,undefined,user.id),eligible:true,minimumTokens:0,checkedAt:now()});return;
         }
+        if(url.pathname==='/api/multiplayer/profile'){
+          rate(req,'multi-profile-write',30,user.id);json(res,{...multiplayer.touchPlayer(user.id,data.name,data.color),profile:multiplayer.profile(user.id)});return;
+        }
+        if(url.pathname.startsWith('/api/multiplayer/'))throw new HttpError(410,'Multiplayer now uses the live WebSocket connection. Reload the game.');
         if(url.pathname==='/api/runs/start'){
           rate(req,'starts',60,user.id);
           if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Please reload the game.');
@@ -268,6 +297,12 @@ function createApp(config,options={}) {
       if(!['GET','HEAD'].includes(req.method))throw new HttpError(405,'Method not allowed.');
       rate(req,'static',600);
       let filename=url.pathname==='/'?'index.html':url.pathname.slice(1),html=null;
+      const replayPage=url.pathname.match(/^\/replay\/([A-Za-z0-9_-]{8,24})$/);
+      if(replayPage){
+        const replay=multiplayer.replay(replayPage[1]);if(!replay)throw new HttpError(404,'Replay not found.');
+        const track=require('./race-tracks.js').getTrack(replay.trackId);const title=escapeHtml(`${track.name} · Catoshi Vault Rush Replay`);
+        html=fs.readFileSync(path.join(__dirname,'replay.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="Watch the final 5 seconds of this Catoshi Vault Rush multiplayer race."><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`);filename='replay.html';
+      }
       const share=url.pathname.match(/^\/score\/([0-9a-f-]{36})$/);
       if(share){
         const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
@@ -303,10 +338,15 @@ function createApp(config,options={}) {
     }
   });
   server.requestTimeout=15000;server.headersTimeout=10000;
-  return {server,db,ranking,config};
+  let realtime=null;
+  if(options.realtime!==false){
+    try{realtime=require('./realtime.cjs').attachRealtime({server,multiplayer,sessionFromRequest,now});}
+    catch(error){if(options.realtime===true)throw error;}
+  }
+  return {server,db,ranking,config,multiplayer,realtime};
 }
 if(require.main===module){
-  const config=configFromEnv();const app=createApp(config);
+  const config=configFromEnv();const app=createApp(config,{realtime:true});
   app.server.listen(config.port,'0.0.0.0',()=>console.log('Catoshi web server listening on port',config.port));
   for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{app.server.close(()=>{app.db.close();process.exit(0);});});
 }
