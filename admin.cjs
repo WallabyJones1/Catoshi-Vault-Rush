@@ -43,13 +43,13 @@ async function recordPayment(db,roundId,signature,config,dependencies={}) {
 }
 function disqualify(db,id,reason){
   if(!reason||reason.length<5||reason.length>300)throw Error('Supply a 5–300 character review reason.');
-  const run=db.prepare('SELECT wallet,round FROM runs WHERE id=? AND submitted IS NOT NULL').get(id);
+  const run=db.prepare('SELECT wallet,session,mode,round FROM runs WHERE id=? AND submitted IS NOT NULL').get(id);
   if(!run)throw Error('Completed run not found.');
   if(db.prepare('SELECT round FROM payouts WHERE round=? UNION SELECT round FROM reward_plans WHERE round=?').get(run.round,run.round))throw Error('A payout plan already freezes this day; review that plan before changing eligibility.');
   db.exec('BEGIN IMMEDIATE');
   try{
     db.prepare('UPDATE runs SET disqualified=? WHERE id=?').run(reason,id);
-    if(run.wallet)syncHolderScores(db,run.wallet,run.round);
+    if(run.mode==='holder')syncHolderScores(db,run.wallet,run.round,run.session);
     db.exec('COMMIT');
   }catch(error){db.exec('ROLLBACK');throw error;}
 }

@@ -5,11 +5,12 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
 const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tokenBalance,escapeHtml}=require('./security.cjs');
-const {dailyQuest,syncHolderScores,publicRun,RUN_FIELDS}=require('./quest.cjs');
+const {dailyQuest,syncHolderScores,publicRun,playerFilter,RUN_FIELDS}=require('./quest.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const ROUND_MS=86400000,GRACE_MS=660000;
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
+const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['engine.js','text/javascript'],
   ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],
@@ -112,23 +113,27 @@ function createApp(config,options={}) {
     if(!value||typeof value!=='object'||Array.isArray(value))throw new HttpError(400,'JSON object required.');
     return value;
   }
-  function holderQuota(wallet,round=Math.floor(now()/ROUND_MS)){
-    const used=db.prepare('SELECT used FROM holder_attempts WHERE wallet=? AND round=?').get(wallet,round)?.used||0;
+  function holderQuota(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+    const owner=playerFilter(wallet,guestSession);
+    const used=wallet?db.prepare('SELECT used FROM holder_attempts WHERE wallet=? AND round=?').get(wallet,round)?.used||0
+      :db.prepare(`SELECT COUNT(*) used FROM runs WHERE ${owner.where} AND round=? AND mode='holder'`).get(owner.value,round).used;
     return {limit:null,used,remaining:null,unlimited:true,resetsAt:(round+1)*ROUND_MS};
   }
-  function holderBest(wallet,round=Math.floor(now()/ROUND_MS)){
-    const run=db.prepare(`SELECT ${RUN_FIELDS} FROM runs WHERE wallet=? AND mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY score DESC,submitted ASC,id ASC LIMIT 1`).get(wallet,round);
+  function holderBest(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+    const owner=playerFilter(wallet,guestSession);
+    const run=db.prepare(`SELECT ${RUN_FIELDS} FROM runs WHERE ${owner.where} AND mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY score DESC,submitted ASC,id ASC LIMIT 1`).get(owner.value,round);
     if(!run)return null;
     const rank=ranking('holder',round).findIndex(value=>value.id===run.id)+1;
     return {...publicRun(run),rank:rank||null};
   }
-  function holderStatus(wallet,round=Math.floor(now()/ROUND_MS)){
-    const history=db.prepare(`SELECT ${RUN_FIELDS},started,expires,disqualified FROM runs WHERE wallet=? AND mode='holder' AND round=? ORDER BY started DESC,rowid DESC LIMIT 10`).all(wallet,round).map(run=>({...publicRun(run),started:run.started,status:run.disqualified?'reviewed out':run.submitted!==null?'completed':run.expires<now()?'expired':'in progress'}));
-    return {wallet,round,quota:holderQuota(wallet,round),best:holderBest(wallet,round),quest:dailyQuest(db,wallet,round),history};
+  function holderStatus(wallet,round=Math.floor(now()/ROUND_MS),guestSession){
+    const owner=playerFilter(wallet,guestSession);
+    const history=db.prepare(`SELECT ${RUN_FIELDS},started,expires,disqualified FROM runs WHERE ${owner.where} AND mode='holder' AND round=? ORDER BY started DESC,rowid DESC LIMIT 10`).all(owner.value,round).map(run=>({...publicRun(run),started:run.started,status:run.disqualified?'reviewed out':run.submitted!==null?'completed':run.expires<now()?'expired':'in progress'}));
+    return {wallet,prizeEligible:Boolean(wallet),round,quota:holderQuota(wallet,round,guestSession),best:holderBest(wallet,round,guestSession),quest:dailyQuest(db,wallet,round,guestSession),history};
   }
   function ownResult(run,req,extra={}){
     const ranks=ranking(run.mode,run.mode==='holder'?run.round:-1),rank=ranks.findIndex(value=>value.id===run.id)+1;
-    return {run:publicRun(run),rank:rank||null,url:siteOrigin(req)+'/score/'+run.id,...(run.wallet?{quota:holderQuota(run.wallet),best:holderBest(run.wallet,run.round),quest:dailyQuest(db,run.wallet,run.round),daily:holderStatus(run.wallet)}:{}),...extra};
+    return {run:publicRun(run),rank:rank||null,url:siteOrigin(req)+'/score/'+run.id,...(run.mode==='holder'?{prizeEligible:Boolean(run.wallet),quota:holderQuota(run.wallet,undefined,run.session),best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session),daily:holderStatus(run.wallet,undefined,run.session)}:{}),...extra};
   }
   function ranking(mode,round){
     return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
@@ -165,7 +170,7 @@ function createApp(config,options={}) {
           const round=Math.floor(now()/ROUND_MS);
           const snapshot=ensureRound(db,round,config,ROUND_MS);
           const rewards=publicRewards(snapshot,config);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-wallet',redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,roundMs:ROUND_MS,roundEnds:(round+1)*ROUND_MS,maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode='holder';
@@ -174,10 +179,11 @@ function createApp(config,options={}) {
           json(res,{mode,round,entries:ranking(mode,round).map((run,index)=>({...publicRun(run),rank:index+1})),updatedAt:now()});return;
         }
         if(req.method==='GET'&&['/api/player-status','/api/holder-status','/api/balance'].includes(url.pathname)){
-          const address=walletAddress(url.searchParams.get('wallet'));
+          const raw=url.searchParams.get('wallet');
+          const address=rewardAddress(raw),guestSession=address?null:session(req,res).id;
           // Validate a public reward address only. Entry/progress never depend
           // on token ownership or on the availability of a Solana RPC.
-          json(res,{...holderStatus(address),eligible:true,minimumTokens:0,checkedAt:now()});return;
+          json(res,{...holderStatus(address,undefined,guestSession),eligible:true,minimumTokens:0,checkedAt:now()});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/vault'){
           if(!config.vault){json(res,{configured:false,payoutMode:'manual-review'});return;}
@@ -198,17 +204,17 @@ function createApp(config,options={}) {
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
         if(['/api/entry','/api/balance'].includes(url.pathname)){
-          const address=walletAddress(data.wallet);
-          json(res,{...holderStatus(address),eligible:true,minimumTokens:0,checkedAt:now()});return;
+          const address=rewardAddress(data.wallet);
+          json(res,{...holderStatus(address,undefined,user.id),eligible:true,minimumTokens:0,checkedAt:now()});return;
         }
         if(url.pathname==='/api/runs/start'){
           rate(req,'starts',60,user.id);
-          if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Reload and paste your rewards wallet.');
+          if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Please reload the game.');
           const mode='holder',name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
           // Legacy mode 'holder' stores all daily prize entries so existing
-          // scores and reward records remain intact. No holdings are required.
-          const rewardWallet=walletAddress(data.wallet);
+          // scores and reward records remain intact. Wallets and holdings are optional.
+          const rewardWallet=rewardAddress(data.wallet);
           const round=Math.floor(now()/ROUND_MS),id=crypto.randomUUID(),seed=crypto.randomInt(1,0xffffffff);
           ensureRound(db,round,config,ROUND_MS);
           // Record starts for daily progress only, without any play limit.
@@ -222,7 +228,7 @@ function createApp(config,options={}) {
             db.prepare('INSERT INTO runs(id,session,seed,name,wallet,mode,round,started,expires,engine)VALUES(?,?,?,?,?,?,?,?,?,?)').run(id,user.id,seed,name,rewardWallet,mode,round,now(),Math.min(now()+1200000,(round+1)*ROUND_MS+GRACE_MS),ENGINE_VERSION);
             db.exec('COMMIT');
           }catch(error){db.exec('ROLLBACK');throw error;}
-          json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS,...(rewardWallet?{...holderStatus(rewardWallet,round)}:{})});return;
+          json(res,{id,seed,mode,round,wallet:rewardWallet,engine:ENGINE_VERSION,maxTicks:MAX_TICKS,...holderStatus(rewardWallet,round,user.id)});return;
         }
         if(url.pathname==='/api/runs/finish'){
           rate(req,'finishes',60,user.id);
@@ -241,7 +247,7 @@ function createApp(config,options={}) {
             if(saved.wallet&&(db.prepare('SELECT round FROM reward_plans WHERE round=? UNION SELECT round FROM payouts WHERE round=?').get(saved.round,saved.round)))throw new HttpError(409,'This day is closed for payout review.');
             const changed=db.prepare('UPDATE runs SET ticks=?,score=?,raw_score=?,distance=?,coins=?,red_tokens=?,rush_pickups=?,reason=?,submitted=?,inputs=? WHERE id=? AND submitted IS NULL').run(data.ticks,checked.score,checked.score,checked.distance,checked.coins,checked.redTokens,checked.rushPickups,checked.reason,now(),JSON.stringify(data.inputs),saved.id);
             if(changed.changes!==1)throw new HttpError(409,'Run already submitted.');
-            if(saved.wallet)syncHolderScores(db,saved.wallet,saved.round);
+            if(saved.mode==='holder')syncHolderScores(db,saved.wallet,saved.round,saved.session);
             db.exec('COMMIT');
           }catch(error){db.exec('ROLLBACK');throw error;}
           const record=db.prepare('SELECT * FROM runs WHERE id=?').get(saved.id);
@@ -257,7 +263,7 @@ function createApp(config,options={}) {
         const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
         if(!run)throw new HttpError(404,'Score not found.');
         const title=escapeHtml(`${run.name} scored ${run.score.toLocaleString()} in Catoshi Vault Rush`);
-        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?'prize':'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?'daily':'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
         filename='index.html';
       }
       if(!STATIC_FILES.has(filename))throw new HttpError(404,'Not found.');

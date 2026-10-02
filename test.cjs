@@ -252,6 +252,7 @@ test('one free play mode requires a reserved run and remembers wallet names with
   const lookup=requests.at(-1);assert.equal(lookup[1],null,'progress is a read-only GET');
   assert.equal(new URLSearchParams(lookup[0].split('?')[1]).get('wallet'),security.MINT);
   assert(!requests.some(([url])=>url.includes('/auth/')),'no connection or signature flow');
+  elements.wallet.value='';await window.RushOnline.prepare();assert.equal(requests.at(-1)[1].wallet,null,'clearing the input overrides a remembered wallet');
 });
 
 test('free prize entry and progress work without any token balance request',async t=>{
@@ -745,34 +746,49 @@ test('a stalled fallback priming request can be retried and its late resolution 
  assert.deepEqual(voices.map(voice=>voice.pauses),counts,'late priming results do not pause a playing effect');sound.setPlaying(false);
 });
 
-test('homepage uses a bundled native ten-frame loop without canvas or animation timers',()=>{
+test('homepage ten-pose loop runs independently of GIF playback and resumes after playing or backgrounding',async()=>{
  const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
- assert.match(html,/<img id="home-catoshi" src="catoshi-home-v2.webp"/);
+ assert.match(html,/<img id="home-catoshi" src="catoshi-home-v2.gif\?v=/);
+ assert.match(html,/<canvas id="home-catoshi-animation"[^>]*hidden/);
  const bytes=fs.readFileSync(path.join(__dirname,'catoshi-home-v2.webp'));
- assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.toString('ascii',8,12),'WEBP');
- let frames=0,loops,total=0;
+ let frames=0,loops;
  for(let offset=12;offset<bytes.length;){
   const kind=bytes.toString('ascii',offset,offset+4),length=bytes.readUInt32LE(offset+4);
   if(kind==='ANIM')loops=bytes.readUInt16LE(offset+12);
-  if(kind==='ANMF'){frames++;total+=bytes.readUIntLE(offset+20,3);}
+  if(kind==='ANMF')frames++;
   offset+=8+length+(length%2);
  }
- assert.equal(frames,10);assert.equal(loops,0,'loop forever');assert(total>=3000&&total<5000);
- const setup=(reduced=false,failed=false)=>{
-  const hero=new Element('home-catoshi');hero.src='catoshi-home-v2.webp';hero.getAttribute=()=>hero.src;
-  hero.complete=failed;hero.naturalWidth=failed?0:320;
-  const preference={matches:reduced,addEventListener(_,fn){this.change=fn;}};
+ assert.equal(frames,10);assert.equal(loops,0);
+ const setup=(canvasWorks=true)=>{
+  const hero=new Element('home-catoshi');hero.src='catoshi-home-v2.gif?v=guest-home-3';hero.getAttribute=()=>hero.src;
+  const canvas=new Element('home-catoshi-animation'),wrapper=new Element('home-mascot'),gate=new Element('gate');
+  const drawn=[],classes=new Set(),queue=new Map();let active=true,sheet,observer,id=0,now=0;
+  wrapper.classList={add:name=>classes.add(name),remove:name=>classes.delete(name)};
+  gate.classList={contains:()=>active};
+  canvas.getContext=()=>canvasWorks?{clearRect(){},beginPath(){},ellipse(){},fill(){},drawImage(...args){drawn.push(args.slice(1));}}:null;
+  const document=new Element('document');document.hidden=false;
+  document.getElementById=id=>({'home-catoshi':hero,'home-catoshi-animation':canvas,'home-mascot':wrapper,gate})[id]||null;
+  const window=new Element('window');window.matchMedia=()=>({matches:true});
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'home.js'),'utf8'),{
-   document:{getElementById:()=>hero},window:{matchMedia:()=>preference},
-   requestAnimationFrame(){throw Error('the native loop must not depend on RAF');}
-  });return {hero,preference};
+   document,window,Image:class{constructor(){sheet=this;this.naturalWidth=1983;this.naturalHeight=793;}},
+   MutationObserver:class{constructor(fn){observer=fn;}observe(){}},
+   requestAnimationFrame:fn=>{queue.set(++id,fn);return id;},cancelAnimationFrame:id=>queue.delete(id)
+  });
+  const advance=n=>{for(let i=0;i<n;i++){now+=80;const callbacks=[...queue.values()];queue.clear();callbacks.forEach(fn=>fn(now));}};
+  return {hero,canvas,classes,drawn,document,window,queue,load:()=>sheet.onload(),advance,gate:value=>{active=value;observer();},fail:()=>sheet.onerror()};
  };
- const normal=setup();assert.equal(normal.hero.src,'catoshi-home-v2.webp');
- normal.hero.dispatch('error');assert.equal(normal.hero.src,'catoshi-home-v2.gif');
- normal.hero.dispatch('error');assert.equal(normal.hero.src,'catoshi-home-still-v2.png');
- const cachedFailure=setup(false,true);assert.equal(cachedFailure.hero.src,'catoshi-home-v2.gif');
- const accessible=setup(true);assert.equal(accessible.hero.src,'catoshi-home-still-v2.png');
- accessible.preference.matches=false;accessible.preference.change();assert.equal(accessible.hero.src,'catoshi-home-v2.webp');
+ const h=setup();h.load();h.advance(100);
+ assert(h.classes.has('animated'));assert(!h.canvas.hidden);
+ assert.equal(new Set(h.drawn.map(crop=>crop.slice(0,4).join(','))).size,10,'all ten poses draw even when native media is frozen or reduced motion is enabled');
+ assert(h.drawn.length>80,'the loop continues into another cycle');
+ const before=h.drawn.length;h.gate(false);h.advance(20);assert.equal(h.drawn.length,before,'homepage work pauses during gameplay');
+ h.gate(true);h.advance(10);assert(h.drawn.length>before,'returning home restarts the loop');
+ h.document.hidden=true;await h.document.dispatch('visibilitychange');assert.equal(h.queue.size,0);
+ h.document.hidden=false;await h.document.dispatch('visibilitychange');h.advance(10);assert(h.queue.size>0);
+ await h.window.dispatch('pagehide');assert.equal(h.queue.size,0);await h.window.dispatch('pageshow');assert.equal(h.queue.size,1);
+ h.fail();assert(h.canvas.hidden);assert(!h.classes.has('animated'),'a failed atlas keeps the native image visible');
+ const fallback=setup(false);await fallback.hero.dispatch('error');assert.match(fallback.hero.src,/catoshi-home-v2.webp/);
+ await fallback.hero.dispatch('error');assert.match(fallback.hero.src,/catoshi-home-still-v2.png/);
 });
 
 test('compact lobby keeps unfunded prizes at $0 and leaderboard renders safe names, ranks and empty/error states',async()=>{
@@ -817,6 +833,9 @@ test('wallet-free scored runs keep private browser progress and never accept a p
  }
  const initial=(await request('/api/player-status')).value;assert.equal(initial.quota.used,0);assert.equal(initial.wallet,null);assert.equal(initial.prizeEligible,false);
  const rules=(await request('/api/config')).value;assert(rules.walletOptional);
+ for(const route of ['/api/entry','/api/balance'])for(const wallet of [undefined,null,'','   ']){
+  const result=await request(route,{...(wallet===undefined?{}:{wallet})});assert.equal(result.status,200);assert.equal(result.value.wallet,null);assert(result.value.eligible);assert.equal(result.value.quota.used,0);
+ }
  assert.equal((await request('/api/runs/start',{name:'Cat',wallet:'bad',engine:security.ENGINE_VERSION})).status,400);
  let firstResult;
  for(const [index,jar]of ['first','first','second'].entries()){

@@ -83,9 +83,11 @@
   async function prepare(){
     submissionGeneration++;lastResult=null;
     $('again').disabled=false;$('again').textContent='RIDE AGAIN';
-    const displayName=$('holder-name').value.trim()||'Runner',rewardWallet=entryWallet;
+    // The current field is authoritative, including when a saved wallet is cleared.
+    const displayName=$('holder-name').value.trim()||'Runner',rewardWallet=$('wallet').value.trim();
+    entryWallet=rewardWallet;
     await getConfig();
-    const ticket=await api('runs/start',{name:displayName,mode:'holder',engine:ENGINE,...(rewardWallet?{wallet:rewardWallet}:{})});
+    const ticket=await api('runs/start',{name:displayName,mode:'holder',engine:ENGINE,wallet:rewardWallet||null});
     rememberHolderName(rewardWallet,displayName);updateStatus(ticket);
     return ticket;
   }
@@ -199,6 +201,6 @@
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}
   });
-  window.RushOnline={prepare,submit,share,getConfig,progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();restoreHolderName(entryWallet);},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,share,getConfig,progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();$('wallet').value=entryWallet;restoreHolderName(entryWallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();
