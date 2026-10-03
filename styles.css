@@ -179,7 +179,9 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 }
 #gate .wordmark{
   margin:0;font:700 24px/1 var(--condensed);letter-spacing:-.01em;white-space:nowrap;
+  display:inline-flex;align-items:center;min-height:44px;color:var(--cream);text-decoration:none;
 }
+#gate .wordmark:focus-visible{outline:2px solid var(--orange);outline-offset:4px;border-radius:3px}
 #gate .wordmark span{color:var(--orange);text-shadow:0 0 14px rgba(242,94,48,.55)}
 #gate .prize-banner{
   padding:8px 14px;max-width:60%;border:1px solid rgba(242,94,48,.35);
