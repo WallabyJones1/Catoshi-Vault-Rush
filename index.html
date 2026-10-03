@@ -16,11 +16,7 @@
   <script defer src="sound.js?v=web-11-terrain-weekly-1"></script>
   <script defer src="home.js?v=web-11-terrain-weekly-1"></script>
   <script defer src="online.js?v=web-11-terrain-weekly-1"></script>
-  <script defer src="/socket.io/socket.io.js"></script>
-  <script defer src="race-tracks.js?v=race-1"></script>
-  <script defer src="race-engine.js?v=race-1"></script>
-  <script defer src="multiplayer.js?v=race-1"></script>
-  <script defer src="game.js?v=race-1"></script>
+  <script defer src="game.js?v=web-11-terrain-weekly-1"></script>
 </head>
 <body>
   <main id="app">
@@ -39,7 +35,6 @@
             <button id="verify-button" class="primary" type="submit">PLAY</button>
           </form>
           <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
-          <button id="multiplayer-button" class="multiplayer-cta" type="button">MULTIPLAYER RACE <span>2–8 PLAYERS</span></button>
           <button id="leaderboard-button" class="ghost" type="button">LIVE LEADERBOARD <span aria-hidden="true">↗</span></button>
           <button id="check-day" class="ghost" type="button">MY PROGRESS</button>
           <details id="holder-daily" class="quest-card" aria-label="Weekly run history and daily red RUSH quest" hidden><summary>MY WEEK <span>UTC</span></summary>
@@ -58,7 +53,7 @@
         <div class="game-shell">
           <canvas id="game" width="960" height="540" tabindex="0" aria-label="Tap or press space to jump; hold while airborne to backflip; release before landing."></canvas>
           <div class="hud">
-            <div class="hud-pickups"><div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div><span id="race-ammo" class="race-ammo" hidden>FIRE <b id="ammo-count">0</b></span><span class="red-count" id="red-rush-hud" aria-label="Red RUSH this run"><i aria-hidden="true"></i><span id="run-red">0 / 5</span></span></div>
+            <div class="hud-pickups"><div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div><span class="red-count" aria-label="Red RUSH this run"><i aria-hidden="true"></i><span id="run-red">0 / 5</span></span></div>
             <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span><div id="lives" class="lives" role="img" aria-label="3 of 3 lives"><i id="life-1" aria-hidden="true"></i><i id="life-2" aria-hidden="true"></i><i id="life-3" aria-hidden="true"></i></div></div>
           </div>
           <div id="rush-burst" class="rush-burst" hidden><strong>RUSH · SHIELDED</strong><span id="rush-time">7.0s</span><progress id="rush-meter" max="7" value="7" aria-label="RUSH burst remaining"></progress></div>
@@ -68,7 +63,6 @@
           <div class="speed-readout"><span id="speed">31</span><small>KM/H</small></div>
           <button id="pause" class="icon-button" type="button" aria-label="Pause game">Ⅱ</button>
           <div id="countdown" class="countdown"></div>
-          <aside id="race-standings" class="race-standings" aria-live="polite" hidden><div class="race-standings-head"><span>LIVE RACE</span><strong id="race-place">—</strong></div><ol id="race-live-list"></ol></aside>
           <div id="pause-panel" class="pause-panel" hidden>
             <p class="eyebrow">TAKE A BREATH</p><h2>PAUSED</h2>
             <button id="resume" type="button">RESUME</button>
@@ -77,8 +71,7 @@
         </div>
         <div class="control-strip">
           <button id="jump-control" type="button" aria-label="Jump; hold for a backflip">TAP TO JUMP <span>HOLD TO BACKFLIP</span></button>
-          <button id="fire-control" class="fire-control" type="button" aria-label="Fire a coin shot" hidden>FIRE <span>5 GOLD</span></button>
-          <p id="control-help">Release before landing.<br><span>SPACE / ↑ on desktop</span></p>
+          <p>Release before landing.<br><span>SPACE / ↑ on desktop</span></p>
         </div>
       </div>
     </section>
@@ -101,39 +94,8 @@
         <p id="result-copy" class="practice-note">Your best checked run counts on the weekly leaderboard.</p>
         <p id="submission-status" class="status" role="status" aria-live="polite"></p>
         <div class="share-actions"><a id="share-x" class="share-link" href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST SCORE TO X ↗</a><button id="copy-score" class="ghost" type="button">COPY</button></div>
-        <div id="replay-actions" class="replay-actions" hidden><a id="watch-replay" class="share-link" href="#">WATCH LAST 5 SECONDS ↗</a><button id="share-replay" class="ghost" type="button">SHARE REPLAY</button></div>
         <button id="result-leaderboard" class="ghost" type="button">LIVE LEADERBOARD</button>
-        <button id="multiplayer-result-board" class="ghost" type="button" hidden>MULTIPLAYER LEADERBOARD</button>
         <p id="share-status" class="status" role="status"></p>
-      </div>
-    </section>
-    <section id="multiplayer-panel" class="leaderboard-panel multiplayer-panel" role="dialog" aria-modal="true" aria-labelledby="multiplayer-title" hidden>
-      <div class="board-card multiplayer-card">
-        <div class="board-heading"><div><p class="eyebrow">CATOSHI VAULT RUSH</p><h2 id="multiplayer-title">MULTIPLAYER</h2></div><button id="close-multiplayer" class="ghost" type="button" aria-label="Close multiplayer">×</button></div>
-        <p class="multi-intro">FREE 2–8 PLAYER RACES · SAME COURSE · NO WALLET NEEDED</p>
-        <div class="multi-join-card">
-          <label for="multiplayer-name">RACER NAME</label>
-          <input id="multiplayer-name" minlength="2" maxlength="20" autocomplete="nickname" placeholder="Your racer name">
-          <fieldset class="color-picker"><legend>NAME + POINTER COLOUR</legend><div id="multiplayer-colors" class="color-swatches" role="radiogroup" aria-label="Racer colour"></div></fieldset>
-          <p class="track-note">10 DEDICATED DOWNHILL TRACKS · FINISH-LINE RACING · COINS FIRE AT RIVALS · ONE-USE SHARED BOOSTS</p>
-          <button id="multiplayer-quick" class="primary" type="button">FIND QUICK RACE</button>
-          <button id="multiplayer-cancel" class="ghost" type="button" hidden>CANCEL SEARCH</button>
-          <p id="multiplayer-status" class="status" role="status" aria-live="polite"></p>
-          <div id="multiplayer-queue" class="multi-queue" hidden><strong id="multi-queue-count">1 / 8</strong><span id="multi-queue-copy">Searching for racers…</span></div>
-        </div>
-        <div id="multiplayer-stats" class="multi-stats" hidden>
-          <div><small>WEEKLY PTS</small><strong id="multi-stat-weekly">0</strong></div>
-          <div><small>RACES</small><strong id="multi-stat-races">0</strong></div>
-          <div><small>WINS</small><strong id="multi-stat-wins">0</strong></div>
-          <div><small>PODIUMS</small><strong id="multi-stat-podiums">0</strong></div>
-          <div><small>WIN RATE</small><strong id="multi-stat-winrate">0%</strong></div>
-          <div><small>BEST SCORE</small><strong id="multi-stat-best">0</strong></div>
-        </div>
-        <div class="board-prize-line"><span>WEEKLY RACERS <small>BEST 30 RACES COUNT</small></span><small id="multi-week-time">MON–SUN UTC</small></div>
-        <div class="board-tabs"><button id="multi-board-current" type="button" aria-pressed="true">THIS WEEK</button><button id="multi-board-previous" type="button" aria-pressed="false">LAST WEEK</button></div>
-        <div class="board-toolbar"><p class="practice-note">PLACEMENT POINTS SCALE WITH FIELD SIZE</p><button id="multi-board-refresh" class="ghost" type="button">REFRESH</button></div>
-        <table class="rankings multi-rankings"><thead><tr><th scope="col">#</th><th scope="col">RACER</th><th scope="col">PTS</th><th scope="col">WINS</th></tr></thead><tbody id="multiplayer-board-rows"></tbody></table>
-        <p id="multiplayer-board-status" class="status">Loading multiplayer rankings…</p>
       </div>
     </section>
     <section id="leaderboard-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="leaderboard-title" hidden>
