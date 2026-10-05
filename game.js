@@ -18,6 +18,8 @@
   let startId = 0, walletRequest = 0, inputPointer = null, keyHeld = false;
   let ticket=null,ticks=0,recording=[];
   let selectedMode='vault',selectedLevel=1;
+  let ghost=null,ghostMessage='',ghostEnabled=true;
+  try{ghostEnabled=localStorage.getItem('rush-trial-ghost')!=='off';}catch{}
   const courses=VaultRush.TRIAL_COURSES||[];
   function formatTime(value){
     const hundredths=Math.floor(Math.max(0,value)*100);
@@ -40,6 +42,25 @@
     }
     const course=courses.find(c=>c.id===selectedLevel);
     if(course)$('trial-target').textContent='PUBLIC BEST TIMES · '+Math.floor(course.distance/10)+'m';
+  }
+  function ghostSetting(){
+    $('ghost-toggle').setAttribute('aria-pressed',String(ghostEnabled));
+    $('ghost-toggle').textContent='FASTEST GHOST · '+(ghostEnabled?'ON':'OFF');
+    if(renderer)renderer.ghost=ghostEnabled?ghost:null;
+  }
+  async function loadGhost(operation,level){
+    ghostMessage='Loading fastest ghost…';
+    try{
+      const response=await window.RushOnline.loadTrialGhost(level);
+      if(operation!==startId||run?.mode!=='trial'||run.trial.id!==level)return;
+      ghost=response.ghost?new VaultRushGhost.Track(response,VaultRush.VERSION,level):null;
+      ghostMessage=ghost?'':'Set the first time';
+      renderer.ghost=ghostEnabled?ghost:null;
+    }catch{
+      if(operation!==startId)return;
+      ghostMessage='Ghost unavailable';
+    }
+    updateHud();
   }
   function selectMode(mode){
     if(phase!=='menu')return;
@@ -125,6 +146,8 @@
       const best=trialBest(selectedLevel);$('trial-best-time').textContent=trial&&best?'PB '+formatTime(best):'';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = trial?new VaultRush.Trial(selectedLevel):new VaultRush.Run(onlineTicket.seed);
+      ghost=null;ghostMessage='';
+      if(trial&&ghostEnabled)loadGhost(operation,selectedLevel);
       renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       sound.setPlaying(true);
       phase = 'countdown'; countdown = VaultRushRenderer.INTRO_DURATION || 1.25; accumulator = 0; trickTime = 0;
@@ -157,11 +180,16 @@
       $('trial-time').textContent=formatTime(run.finishTime??run.time);
       $('trial-distance').value=Math.min(1,run.player.x/run.trial.distance);
       ui.distance.textContent=Math.max(0,Math.ceil((run.trial.distance-run.player.x)/10))+'m TO GO';
+      $('ghost-status').hidden=!ghostEnabled;
+      $('ghost-name').textContent=ghost?'GHOST · '+ghost.name+' · '+formatTime(ghost.timeMs/1000):ghostMessage;
+      const delta=ghost?ghost.delta(run.finishTime??run.time,run.player.x):0;
+      $('ghost-gap').textContent=ghost?(Math.abs(delta)<.01?'LEVEL':(delta<0?'−':'+')+Math.abs(delta).toFixed(2)+'s '+(delta<0?'AHEAD':'BEHIND')):'';
+      $('ghost-gap').classList.toggle('ahead',Boolean(ghost)&&delta<-.01);
     }
     const cargo=run.items.some(item=>item.type==='cargo'&&item.drop.at!==null&&!item.drop.landed&&item.x>run.player.x-50&&item.x-run.player.x<1000);
     const sand=run.player.grounded&&run.sandAt(run.player.x)>.2;
     ui.warning.hidden=!(run.dog.warning||cargo||sand);
-    ui.warning.textContent=run.dog.warning?'HOUND CLOSING · KEEP MOVING':cargo?'INCOMING CARGO ↓':'SOFT SAND · JUMP TO KEEP SPEED';
+    ui.warning.textContent=run.dog.warning?'HOUND CLOSING · JUMP OR BOOST':cargo?'INCOMING CARGO ↓':'SOFT SAND · JUMP TO KEEP SPEED';
     ui.warning.classList.toggle('sand-warning',!run.dog.warning&&!cargo&&sand);
   }
   function events() {
@@ -231,7 +259,10 @@
     ui['final-distance'].textContent=Math.floor(run.player.x/10)+'m';
     $('final-score-label').textContent='TIME';ui['final-score'].textContent=complete?formatTime(seconds):'—';
     $('final-coins-label').textContent='BOOSTS';ui['final-coins'].textContent=run.boostsCollected;
-    $('run-pickups').textContent='';$('personal-best').textContent='';
+    const ghostDifference=ghost?seconds-ghost.timeMs/1000:0;
+    $('run-pickups').textContent=complete&&ghost?(Math.abs(ghostDifference)<.005?'MATCHED THE GHOST':
+      (ghostDifference<0?'BEAT THE GHOST BY ':'GHOST FINISHED ')+Math.abs(ghostDifference).toFixed(2)+'s'+(ghostDifference<0?'':' AHEAD')):'';
+    $('personal-best').textContent='';
     $('result-quest').textContent='';$('submission-status').textContent='';$('share-status').textContent='';
     ui['result-copy'].textContent=complete?'Your fastest checked finish counts on this track’s public leaderboard.':'Jump before the red gap markers. Ride again to finish the course.';
     $('result-leaderboard').hidden=true;$('next-trial').hidden=!complete||course.id===5;
@@ -326,6 +357,8 @@
   // Prize entry is free; rewards are bound to the pasted public address.
   $('mode-vault').addEventListener('click',()=>selectMode('vault'));
   $('mode-trial').addEventListener('click',()=>selectMode('trial'));
+  $('ghost-toggle').addEventListener('click',()=>{ghostEnabled=!ghostEnabled;try{localStorage.setItem('rush-trial-ghost',ghostEnabled?'on':'off');}catch{}ghostSetting();});
+  ghostSetting();
   $('next-trial').addEventListener('click',()=>{selectedLevel=Math.min(5,selectedLevel+1);begin();});
   $('trial-leaderboard-button').addEventListener('click',()=>window.RushOnline.openTrialBoard(selectedLevel));
   $('result-trial-leaderboard').addEventListener('click',()=>window.RushOnline.openTrialBoard(run?.trial?.id||selectedLevel));

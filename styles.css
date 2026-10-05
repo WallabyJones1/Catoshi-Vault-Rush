@@ -321,3 +321,11 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 .trial-board-tabs button[aria-pressed=true]{border-color:var(--orange);color:var(--cream);background:rgba(242,107,53,.1)}
 .trial-rankings td:last-child{font-family:var(--mono);white-space:nowrap;color:var(--orange)}
 @media(max-width:400px){.trial-rankings th:nth-child(3){width:42%}.trial-rankings td:last-child{font-size:13px}}
+.ghost-status{display:flex;flex-direction:column;gap:5px;max-width:210px;margin-top:8px}
+.ghost-status small{font:10px/1.5 var(--mono);letter-spacing:0;color:var(--grey);overflow-wrap:anywhere}
+.ghost-status #ghost-gap{font:12px var(--mono);color:var(--cream)}
+.ghost-status #ghost-gap.ahead{color:var(--green)}
+.ghost-status[hidden]{display:none!important}
+#gate #ghost-toggle{min-height:44px;font-size:11px;margin-bottom:8px;color:var(--grey)}
+#gate #ghost-toggle[aria-pressed=true]{color:var(--cream);border-color:rgba(242,239,233,.35)}
+@media(max-width:600px){.ghost-status{max-width:40vw}.ghost-status small{font-size:9px}.ghost-status #ghost-gap{font-size:11px}}

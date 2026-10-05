@@ -16,7 +16,7 @@ const rewardAddress=value=>value===undefined||value===null||(typeof value==='str
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['engine.js','text/javascript'],
   ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>[font+'.woff2','font/woff2']),
-  ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],
+  ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],['ghost.js','text/javascript'],
   ['sound.js','text/javascript'],['audio-config.js','text/javascript'],['catoshi-coin.png','image/png'],
   ['rush-pickups-v1.png','image/png'],['rush-pickups-v2.png','image/png'],['home.js','text/javascript'],['catoshi-home-loop-v1.png','image/png'],
   ['catoshi-home-v2.webp','image/webp'],['catoshi-home-v2.gif','image/gif'],['catoshi-home-still-v2.png','image/png'],
@@ -56,6 +56,7 @@ function openDatabase(filename) {
     if(!columns.has(name))db.exec('ALTER TABLE runs ADD COLUMN '+name+' '+type);
   }
   db.exec('UPDATE runs SET raw_score=score WHERE submitted IS NOT NULL AND raw_score IS NULL;');
+  if(!db.prepare('PRAGMA table_info(trial_runs)').all().some(column=>column.name==='ghost'))db.exec('ALTER TABLE trial_runs ADD COLUMN ghost TEXT');
   return db;
 }
 function configFromEnv(env=process.env) {
@@ -219,6 +220,11 @@ function createApp(config,options={}) {
           const level=Number(url.searchParams.get('level')),course=trialCourse(level);
           json(res,{course,engine:ENGINE_VERSION,entries:trialRanking(level).map((run,index)=>({...publicTrial(run),rank:index+1})),updatedAt:now()});return;
         }
+        if(req.method==='GET'&&url.pathname==='/api/trials/ghost'){
+          const level=Number(url.searchParams.get('level'));trialCourse(level);
+          const fastest=db.prepare('SELECT id,name,time_ms,ticks,ghost FROM trial_runs WHERE level=? AND engine=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY time_ms,submitted,id LIMIT 1').get(level,ENGINE_VERSION);
+          json(res,{engine:ENGINE_VERSION,level,ghost:fastest?.ghost?{id:fastest.id,name:fastest.name,timeMs:fastest.time_ms,ticks:fastest.ticks,samples:JSON.parse(fastest.ghost)}:null});return;
+        }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode='holder';
           const raw=url.searchParams.get('round');let round=currentRound(now());
@@ -271,7 +277,7 @@ function createApp(config,options={}) {
           // boosts, wallet and level in a finish request; replay is authoritative.
           const checked=await checkReplay(0,data.ticks,data.inputs,saved.level);
           if(saved.expires<now())throw new HttpError(410,'This Speed Trial expired. Start a new run.');
-          const changed=db.prepare('UPDATE trial_runs SET ticks=?,time_ms=?,boosts=?,submitted=?,inputs=? WHERE id=? AND submitted IS NULL').run(data.ticks,checked.timeMs,checked.boosts,now(),JSON.stringify(data.inputs),saved.id);
+          const changed=db.prepare('UPDATE trial_runs SET ticks=?,time_ms=?,boosts=?,submitted=?,inputs=?,ghost=? WHERE id=? AND submitted IS NULL').run(data.ticks,checked.timeMs,checked.boosts,now(),JSON.stringify(data.inputs),JSON.stringify(checked.trajectory),saved.id);
           const record=db.prepare('SELECT * FROM trial_runs WHERE id=?').get(saved.id);
           json(res,trialResult(record,req,{duplicate:changed.changes!==1}));return;
         }

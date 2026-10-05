@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {Run}=require('./engine.js');
+const {Run,SPEED_LIMITS}=require('./engine.js');
 const {openDatabase}=require('./server.cjs');
 const {dailyQuest,syncHolderScores}=require('./quest.cjs');
 const {disqualify}=require('./admin.cjs');
@@ -12,10 +12,10 @@ function flat(){
 }
 test('gold RUSH grants exactly seven simulation seconds of speed and full gameplay protection',()=>{
  const run=flat();run.items=[{type:'rush',x:3,y:183,hit:false}];run.step(1/120);
- assert.equal(run.rushPickups,1);assert.equal(run.player.rush,7);assert.equal(run.player.speed,950);
+ assert.equal(run.rushPickups,1);assert.equal(run.player.rush,7);assert.equal(run.player.speed,SPEED_LIMITS.rushStart);
  assert(run.drainEvents().some(e=>e.type==='rush'&&e.seconds===7));
  run.items=[{type:'boost',x:run.player.x+4,y:200,hit:false}];run.step(1/120);
- assert(run.player.speed>=950,'ordinary green boost cannot cap an active RUSH burst');
+ assert(run.player.speed>=SPEED_LIMITS.rushStart,'ordinary green boost cannot cap an active RUSH burst');
  const obstacle={type:'stack',x:30,y:200,width:50,height:65,heavy:true,hazard:true,hit:false};
  run.items=[obstacle];run.gaps=[{x:100,end:900}];run.dog={active:true,distance:25,warning:true};
  for(let n=0;n<120;n++)run.step(1/120);
@@ -26,7 +26,7 @@ test('gold RUSH grants exactly seven simulation seconds of speed and full gamepl
  for(let n=121;n<840;n++)run.step(1/120);
  assert(run.player.rush<1e-9,'time does not extend beyond seven seconds');
  run.step(1/120);assert.equal(run.player.rush,0);
- for(let n=0;n<150;n++)run.step(1/120);assert(run.player.speed<=760,'burst speed eases back to ordinary speed');
+ for(let n=0;n<150;n++)run.step(1/120);assert(run.player.speed<=SPEED_LIMITS.ground,'burst speed eases back to ordinary speed');
  Object.assign(run.player,{airborne:1,held:true,angle:Math.PI,vy:1800,vx:400});run.land(200,0);assert(!run.dead);assert.equal(run.lives,2,'ordinary landing damage resumes after the shield');
  const limited=flat();limited.player.rush=7;limited.crash('TIME LIMIT');assert(limited.dead,'power cannot bypass server run duration');
 });

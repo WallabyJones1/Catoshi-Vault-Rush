@@ -44,16 +44,27 @@ function replay(seed,ticks,inputs,trialLevel=null) {
     held=Boolean(input[1]);previous=input[0];
   }
   const run=trialLevel===null?new Run(seed):new Trial(trialLevel);let cursor=0;
+  // Ghosts are derived from the authoritative replay, never client positions.
+  // Thirty poses per second are enough for a smooth visual opponent without
+  // publishing its raw button recording or its private browser identity.
+  const trajectory=[];
+  function pose(tick){
+    const p=run.player;
+    trajectory.push([Math.round(tick*1000)/1000,Math.round(p.x*100)/100,Math.round(p.y*100)/100||0,Math.round(p.angle*10000)/10000||0,
+      (p.grounded?1:0)|(p.held&&p.heldTime>.14?2:0)|(p.rail?4:0)|(p.vy<0?8:0)]);
+  }
+  if(trialLevel!==null)pose(0);
   for(let tick=0;tick<ticks;tick++){
     if(run.dead)throw new HttpError(400,'Recording continues after the run ended.');
     while(cursor<inputs.length&&inputs[cursor][0]===tick){inputs[cursor++][1]?run.press():run.release();}
     run.step(1/120);run.drainEvents();
+    if(trialLevel!==null&&(run.finished||(tick+1)%4===0))pose(run.finished?run.finishTime*120:tick+1);
   }
   if(ticks===MAX_TICKS&&!run.dead)run.crash('TIME LIMIT');
   if(!run.dead)throw new HttpError(400,'Only completed runs can enter the leaderboard.');
   if(trialLevel!==null){
     if(!run.finished)throw new HttpError(400,'Reach the finish line to post a Speed Trial time.');
-    return {level:trialLevel,timeMs:Math.round(run.finishTime*1000),boosts:run.boostsCollected,distance:Math.floor(run.trial.distance/10)};
+    return {level:trialLevel,timeMs:Math.round(run.finishTime*1000),boosts:run.boostsCollected,distance:Math.floor(run.trial.distance/10),trajectory};
   }
   return {score:Math.floor(run.score),distance:Math.floor(run.player.x/10),coins:run.coins,redTokens:run.redTokens,rushPickups:run.rushPickups,reason:run.reason};
 }

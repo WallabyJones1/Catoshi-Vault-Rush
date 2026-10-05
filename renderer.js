@@ -90,6 +90,8 @@
       this.visualPlayer = null;
       this.clock = 0;
       this.lookAhead=0;
+      this.ghost=null;
+      this.visualTime=0;
     }
     resize(run) {
       this.width = this.ctx.canvas?.width || W;
@@ -232,6 +234,7 @@
     update(run, dt, alpha=1) {
       if (!this.ready) this.reset(run);
       this.clock+=dt;
+      this.visualTime=Math.max(0,run.time-(run.dead?0:(1-clamp(alpha,0,1))/120));
       const old=run.previousPlayer,current=run.player;
       this.visualPlayer={...current};
       if(old&&!run.dead){
@@ -557,6 +560,25 @@
       ctx.bezierCurveTo(22,13,15,18,12,21);ctx.closePath();ctx.fill();ctx.stroke();
       ctx.restore();
     }
+    drawGhost(run,left,right){
+      if(!this.ghost||run.mode!=='trial'||this.intro>0)return;
+      const seconds=this.visualTime,ghost=this.ghost.poseAt(seconds);
+      if(seconds>this.ghost.timeMs/1000+.6||ghost.x<left||ghost.x>right)return;
+      const ctx=this.ctx,portrait=this.height>this.width;
+      ctx.save();ctx.strokeStyle='#f2efe9';ctx.lineWidth=1.4;ctx.globalAlpha=.20;
+      ctx.setLineDash([5,7]);ctx.beginPath();
+      for(let i=0;i<=10;i++){
+        const pose=this.ghost.poseAt(Math.max(0,seconds-.4+i*.04));
+        if(i===0)ctx.moveTo(pose.x,pose.y-18);else ctx.lineTo(pose.x,pose.y-18);
+      }
+      ctx.stroke();ctx.setLineDash([]);
+      ctx.translate(ghost.x,ghost.y-1);ctx.rotate(ghost.angle);
+      ctx.globalAlpha=.32*(ghost.finished?Math.max(0,1-(seconds-this.ghost.timeMs/1000)/.6):1);
+      const frame=ghost.flipping?2:ghost.rail?3:ghost.grounded?1:ghost.rising?4:5;
+      this.sprite(this.images.characters,characters[frame],0,0,portrait?60:40,false);
+      ctx.globalAlpha=.45;ctx.strokeStyle='#f2efe9';ctx.lineWidth=1;
+      ctx.beginPath();ctx.moveTo(-17,3);ctx.lineTo(17,3);ctx.stroke();ctx.restore();
+    }
     draw(run) {
       const ctx = this.ctx, p = this.visualPlayer||run.player, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W;
@@ -661,6 +683,7 @@
         ctx.save();ctx.translate(q.x,q.y);if(q.angle!==undefined)ctx.rotate(q.angle);ctx.fillRect(-q.size/2,-q.size/2,q.size,q.size);ctx.restore();
       }
       ctx.globalAlpha=1;
+      this.drawGhost(run,left,right);
       if(run.dog.active){
         const dx=p.x-run.dog.distance;
         const frame=8+Math.floor(run.time*11)%4;

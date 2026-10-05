@@ -26,8 +26,8 @@ test('varied terrain, safe introductions, immediate jumping, backflip bonus and 
   const run=new Run(1234);run.press();assert(!run.player.grounded);advance(run,8);run.release();advance(run,200);assert(!run.dead);
   const flip=new Run(4321);Object.assign(flip.player,{grounded:false,airborne:2,spin:TAU+.15,vx:420,vy:0,angle:flip.slope(0)});
   flip.release();flip.land(flip.terrain(0),flip.slope(0));assert(flip.score>=1000);assert(flip.drainEvents().some(e=>e.text==='BACKFLIP'));
-  const chase=new Run(5);chase.terrain=()=>200;chase.derivative=()=>0;chase.slope=()=>0;chase.player.y=200;chase.player.speed=90;chase.player.boost=0;chase.items=[];
-  advance(chase,130);assert(chase.dog.active);chase.player.speed=500;advance(chase,180);assert(!chase.dead);assert(!chase.dog.active);
+  const chase=new Run(5);chase.terrain=()=>200;chase.derivative=()=>0;chase.slope=()=>0;chase.player.x=3000;chase.player.y=200;chase.player.speed=90;chase.player.boost=0;chase.items=[];chase.nextFeature=chase.nextScenery=Infinity;
+  advance(chase,130);assert(chase.dog.active);chase.player.speed=500;advance(chase,270);assert(!chase.dead);assert(!chase.dog.active);
 });
 test('terrain has large smooth hills, distinct regions and lookup-order-independent seeds',()=>{
   const modes=new Set(),openings=new Set();let biggest=0;
@@ -360,7 +360,7 @@ test('large obstacles slow the rider, consume collisions once and allow clean ju
     const idle=setup();idle.items[0].type=kind;idle.combo=5;let impact;
     for(let tick=0;tick<120&&!impact;tick++){idle.step(1/120);impact=idle.drainEvents().find(event=>event.type==='stumble');}
     assert(impact&&impact.heavy);assert(!idle.dead);assert.equal(idle.combo,1);
-    assert(idle.player.speed>=200&&idle.player.speed<300);assert(impact.loss>140,'big objects remove noticeable momentum without stopping the rider');
+    assert(idle.player.speed>=115&&idle.player.speed<220);assert(impact.loss>180,'big objects remove about half the momentum without immediately ending the run');
     advance(idle,90);assert(!idle.dead,'an obstacle impact does not end the run');
     assert(!idle.drainEvents().some(event=>event.type==='stumble'),'do not hit the same object twice');
   }
@@ -454,8 +454,8 @@ test('high-jump cameras keep Catoshi in frame and play-area CSS suppresses iPhon
 
 test('mobile camera reveals the descending landing on a recorded high balloon route while keeping the hero clear',()=>{
   const {Renderer}=require('./renderer.js');
-  const inputs=[[663,1],[663,0],[1193,1],[1193,0],[1375,1],[1375,0],[2024,1],[2024,0],[2770,1],[2770,0],[3455,1],[3455,0],[3866,1],[3866,0]];
-  const run=new Run(2),width=600,height=960,renderer=new Renderer({canvas:{width,height}},{});renderer.reset(run);
+  const inputs=[[746,1],[746,0],[1000,1],[1000,0],[1436,1],[1436,0],[1669,1],[1669,0],[1972,1],[1972,0]];
+  const run=new Run(7),width=600,height=960,renderer=new Renderer({canvas:{width,height}},{});renderer.reset(run);
   let cursor=0,samples=0,lowestLanding=0;
   for(let tick=0;tick<120*65&&!run.dead;tick++){
     while(cursor<inputs.length&&inputs[cursor][0]===tick){inputs[cursor++][1]?run.press():run.release();}
@@ -516,9 +516,10 @@ test('landing on a tall obstacle cannot bypass the nonfatal collision response o
   const run=recoveryRun();run.items=[{type:kind,x:104,y:200,width:74,height:70,heavy:true,hazard:true}];
   run.dog={active:true,distance:24.1,warning:true};run.step(1/120);
   assert(!run.dead,kind+' collision and landing must survive');advance(run,1);assert(run.player.grounded);
-  assert(run.player.recovery>1.4);assert(run.dog.distance>=180);assert(!run.dog.warning);
+  assert(run.player.recovery>1);assert(run.dog.distance>=90);assert(!run.dog.warning);
   assert.equal(run.drainEvents().filter(event=>event.type==='stumble').length,1);
-  advance(run,240);assert(!run.dead,'recovery keeps the run alive');assert(run.player.recovery===0);
+  advance(run,100);assert(!run.dead,'brief recovery prevents an instant second punishment');
+  run.press();run.release();advance(run,100);assert(!run.dead,'a prompt jump gives time to escape');assert(run.player.recovery===0);
  }
  const unprotected=recoveryRun();advance(unprotected,2);assert(!unprotected.dead,'an unheld high landing also recovers');assert(unprotected.player.grounded);assert(unprotected.player.recovery>1);
 });

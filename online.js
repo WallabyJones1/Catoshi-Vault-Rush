@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-12-single-player-polish';
+  const ENGINE='flow-web-13-ghost-challenge';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
@@ -104,6 +104,7 @@
     if(!ticket?.id)throw Error('Speed Trial not reserved. Please start again.');
     return api('trials/finish',{id:ticket.id,ticks,inputs});
   }
+  async function loadTrialGhost(level){return api('trials/ghost?level='+level,null,4500);}
   async function submit(ticket,ticks,inputs){
     lastResult=null;
     const generation=++submissionGeneration;
@@ -278,6 +279,6 @@
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}
   });
-  window.RushOnline={prepare,submit,prepareTrial,submitTrial,openTrialBoard,share,getConfig,cancelSubmission:()=>{submissionGeneration++;},progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();$('wallet').value=entryWallet;restoreHolderName(entryWallet);},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,prepareTrial,submitTrial,loadTrialGhost,openTrialBoard,share,getConfig,cancelSubmission:()=>{submissionGeneration++;},progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();$('wallet').value=entryWallet;restoreHolderName(entryWallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();

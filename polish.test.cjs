@@ -16,7 +16,7 @@ function ride(level,active=true){
     if(active&&p.grounded){
       const gap=run.gaps.find(g=>g.x>p.x&&g.x-p.x<p.speed*.16);
       const nearGap=run.gaps.some(g=>g.x>p.x&&g.x-p.x<700);
-      const boost=!nearGap&&run.items.find(i=>i.aerial&&!i.hit&&i.x>p.x&&i.x-p.x<p.speed*.45);
+      const boost=active!=='safe'&&!nearGap&&run.items.find(i=>i.aerial&&!i.hit&&i.x>p.x&&i.x-p.x<p.speed*.45);
       const ramp=run.ramps.find(r=>r.end>p.x&&r.end-p.x<p.speed*.12);
       if(gap||boost||ramp){inputs.push([ticks,1],[ticks,0]);run.press();run.release();}
     }
@@ -27,7 +27,10 @@ function ride(level,active=true){
   }
   return {run,ticks,inputs,maxAir};
 }
-const completed=new Map(TRIAL_COURSES.map(c=>[c.id,ride(c.id)]));
+const completed=new Map(TRIAL_COURSES.map(c=>{
+  const lines=[ride(c.id),ride(c.id,'safe')].filter(r=>r.run.finished).sort((a,b)=>a.run.finishTime-b.run.finishTime);
+  return [c.id,lines[0]||ride(c.id)];
+}));
 
 test('five fixed courses have reachable gaps, boosts and large jumps; all complete and replay exactly',async()=>{
   assert.equal(TRIAL_COURSES.length,5);
@@ -46,11 +49,12 @@ test('five fixed courses have reachable gaps, boosts and large jumps; all comple
     assert.equal(checked.timeMs,Math.round(recording.run.finishTime*1000));
     assert.equal(checked.boosts,recording.run.boostsCollected);
     assert.deepEqual(await checkReplay(1,recording.ticks,recording.inputs,course.id),checked,'worker uses course ticket, never random seed');
-    assert.equal(ride(course.id).run.finishTime,recording.run.finishTime);
+    const repeated=replay(999,recording.ticks,recording.inputs,course.id);
+    assert.deepEqual(repeated,checked,'the chosen route stays deterministic');
     assert.throws(()=>replay(0,recording.ticks+1,recording.inputs,course.id),/continues/);
     assert.throws(()=>replay(0,1,[],course.id),/completed/);
   }
-  for(const level of [1,3,4,5]){
+  for(const level of [1,2,3,4,5]){
     const missed=ride(level,false);assert.equal(missed.run.reason,'MISSED THE GAP');
     assert.throws(()=>replay(0,missed.ticks,missed.inputs,level),/finish line/);
   }
@@ -76,6 +80,7 @@ test('a single atmosphere stays fixed throughout a run, with seed variety and no
 test('parachute warning is intangible, only the descending box hurts, and one crate takes at most one life',()=>{
   const run=new Run(10);run.items=[];run.nextFeature=run.nextScenery=Infinity;
   const item=run.addCargo(800,5),floor=run.terrain(item.x);
+  run.player.x=200;run.player.y=run.terrain(200);
   run.updateCargo();assert.equal(item.drop.at,0);assert(run.drainEvents().some(e=>e.type==='cargo-warning'));
   Object.assign(run.player,{x:item.x,y:item.y});
   assert(!run.touchesObstacle(item),'warning is not a collider');
@@ -191,7 +196,8 @@ test('simultaneous retries save one trial finish and fastest-first ranking retai
   const payload={id:ticket.id,ticks:recording.ticks,inputs:recording.inputs};
   const results=await Promise.all([h.request('/api/trials/finish',payload),h.request('/api/trials/finish',payload)]);
   assert(results.every(r=>r.status===200));assert.equal(results.filter(r=>r.value.duplicate).length,1);
-  const slow=(await h.start(2,'Slow Cat',null,'slow')).value,coast=ride(2,false);h.clock+=60000;
+  const slow=(await h.start(2,'Slow Cat',null,'slow')).value,coast=[ride(2),ride(2,'safe')].sort((a,b)=>b.run.finishTime-a.run.finishTime)[0];h.clock+=60000;
+  assert(coast.run.finished);
   assert(coast.run.finishTime>recording.run.finishTime);
   assert.equal((await h.request('/api/trials/finish',{id:slow.id,ticks:coast.ticks,inputs:coast.inputs},'slow')).status,200);
   let board=(await h.request('/api/trials/leaderboard?level=2')).value;
@@ -201,6 +207,27 @@ test('simultaneous retries save one trial finish and fastest-first ranking retai
   assert.equal(board.entries.length,2);assert.equal(board.entries[1].id,faster.id);
   h.app.db.prepare('UPDATE trial_runs SET disqualified=? WHERE id=?').run('reviewed',faster.id);
   assert.equal((await h.request('/api/trials/leaderboard?level=2')).value.entries[1].id,slow.id);
+});
+
+test('public ghost is the fastest current verified finish; no raw inputs, wallet or session escape',async t=>{
+  const h=await harness(t);
+  assert.equal((await h.request('/api/trials/ghost?level=0')).status,400);
+  assert.equal((await h.request('/api/trials/ghost?level=1')).value.ghost,null);
+  const ticket=(await h.start(1,'Ghost Cat',WALLET)).value;
+  const finish=await h.finish(ticket,'main',{ghost:[[0,999,999,0,0]],trajectory:[],timeMs:1});
+  assert.equal(finish.status,200);assert(!('trajectory'in finish.value.run));
+  const response=(await h.request('/api/trials/ghost?level=1',null,'public')).value;
+  assert.equal(response.engine,VERSION);assert.equal(response.level,1);assert.equal(response.ghost.id,ticket.id);
+  assert.equal(response.ghost.name,'Ghost Cat');assert.equal(response.ghost.timeMs,finish.value.run.timeMs);
+  assert.deepEqual(response.ghost.samples,replay(0,completed.get(1).ticks,completed.get(1).inputs,1).trajectory);
+  assert(!/wallet|session|inputs|expires|seed/.test(JSON.stringify(response)));
+  const {Track}=require('./ghost.js');const track=new Track(response,VERSION,1);
+  assert.equal(track.poseAt(0).x,0);assert.equal(track.poseAt(9999).x,TRIAL_COURSES[0].distance);
+  await h.restart();assert.deepEqual((await h.request('/api/trials/ghost?level=1')).value,response);
+  h.app.db.prepare('UPDATE trial_runs SET disqualified=? WHERE id=?').run('reviewed',ticket.id);
+  assert.equal((await h.request('/api/trials/ghost?level=1')).value.ghost,null);
+  h.app.db.prepare('UPDATE trial_runs SET disqualified=NULL,engine=? WHERE id=?').run('old-engine',ticket.id);
+  assert.equal((await h.request('/api/trials/ghost?level=1')).value.ghost,null);
 });
 
 // A lightweight DOM keeps these integration tests dependency-free. It exercises
@@ -223,15 +250,17 @@ function dom(){
   return {document,window,elements,localStorage};
 }
 test('Speed Trial UI starts without a wallet, records jumps, posts a time, retries failures and switches back to Vault Run',async()=>{
-  const d=dom(),{document,window,elements}=d;let now=0,frame=null,run,posts=0,starts=0;
+  const d=dom(),{document,window,elements}=d;let now=0,frame=null,run,posts=0,starts=0,ghostFail=false;
   elements.game.getContext=()=>({fillRect(){}});
   window.RushOnline={prepareTrial:async level=>{starts++;return {id:'trial',level,wallet:null,maxTicks:MAX_TICKS};},prepare:async()=>({id:'vault',seed:7,wallet:null,maxTicks:MAX_TICKS}),setWallet(){},share(){},submit:async()=>null,
+    loadTrialGhost:async level=>{if(ghostFail)throw Error('Ghost service offline');const recording=completed.get(level),checked=replay(0,recording.ticks,recording.inputs,level);return {engine:VERSION,level,ghost:{id:'fastest',name:'Ghost Cat',ticks:recording.ticks,timeMs:checked.timeMs,samples:checked.trajectory}};},
     submitTrial:async(ticket,ticks,inputs)=>{posts++;if(posts===1)throw Error('Temporary outage');const result=replay(0,ticks,inputs,ticket.level);return {run:{...result},rank:1,best:{timeMs:result.timeMs,rank:1}};}};
-  const context={...d,console,location:{search:'?trial=1'},URLSearchParams,performance:{now:()=>now},VaultRush:{...engine,Run:class extends Run{constructor(seed){super(seed);run=this;}},Trial:class extends Trial{constructor(level){super(level);run=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
+  const context={...d,console,location:{search:'?trial=1'},URLSearchParams,performance:{now:()=>now},VaultRushGhost:require('./ghost.js'),VaultRush:{...engine,Run:class extends Run{constructor(seed){super(seed);run=this;}},Trial:class extends Trial{constructor(level){super(level);run=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
   assert.equal(elements['mode-trial']['aria-pressed'],'true');assert.equal(elements['trial-levels'].children.length,5);
   assert(!elements['holder-name'].disabled&&!elements.wallet.disabled);
   await elements['wallet-form'].dispatch('submit');assert.equal(run.mode,'trial');assert.equal(starts,1);
+  assert.match(elements['ghost-name'].textContent,/Ghost Cat/);
   const tick=()=>{now+=1000/120;const callback=frame;frame=null;callback?.(now);};
   for(let i=0;i<180;i++)tick();
   const before=run.time;await elements.pause.dispatch('click');for(let i=0;i<30;i++)tick();assert.equal(run.time,before);await elements.resume.dispatch('click');
@@ -248,7 +277,7 @@ test('Speed Trial UI starts without a wallet, records jumps, posts a time, retri
   await elements['retry-trial'].onclick();assert.equal(posts,2);assert(elements['retry-trial'].hidden);assert.match(elements['submission-status'].textContent,/#1/);
   assert.equal(elements['final-score-label'].textContent,'TIME');assert(elements['result-leaderboard'].hidden);assert(!elements['result-trial-leaderboard'].hidden);
   assert(!/GOLD|SILVER|BRONZE/.test(elements['result-reason'].textContent));
-  await elements['next-trial'].dispatch('click');await new Promise(resolve=>setImmediate(resolve));assert.equal(run.trial.id,2);
+  ghostFail=true;await elements['next-trial'].dispatch('click');await new Promise(resolve=>setImmediate(resolve));assert.equal(run.trial.id,2);assert.equal(elements['ghost-name'].textContent,'Ghost unavailable');
   await elements['pause-menu'].dispatch('click');await elements['mode-vault'].dispatch('click');await elements['wallet-form'].dispatch('submit');assert.equal(run.mode,'vault');assert(!elements.lives.hidden);
 });
 

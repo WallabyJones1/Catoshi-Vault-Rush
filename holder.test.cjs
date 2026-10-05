@@ -143,14 +143,14 @@ test('leaderboard publishes one best completed run per holder wallet, preserving
 
 test('native red pickups unlock a daily boost that survives midnight on the weekly board, then resets on Monday',async t=>{
  const h=await harness(t,{durable:true});
- // A completed native v12 recording earns both pickups before its third hit.
- const inputs=[[637,1],[637,0],[801,1],[801,0],[1051,1],[1051,0],[1214,1],[1214,0],[1514,1],[1514,0],[1869,1],[1869,0],[2715,1],[2715,0],[3027,1],[3027,0],[3295,1],[3295,0]];
- const run=new Run(3);let ticks=0,cursor=0;
+ // A completed native v13 recording earns both pickups before the hound catches up.
+ const inputs=[[746,1],[746,0],[1000,1],[1000,0],[1436,1],[1436,0],[1669,1],[1669,0],[1972,1],[1972,0]];
+ const run=new Run(7);let ticks=0,cursor=0;
  while(!run.dead&&ticks<MAX_TICKS){while(cursor<inputs.length&&inputs[cursor][0]===ticks){inputs[cursor++][1]?run.press():run.release();}run.step(1/120);run.drainEvents();ticks++;}
  assert.equal(run.redTokens,1);assert.equal(run.rushPickups,1);assert(run.dead);const rawScore=Math.floor(run.score),results=[];
  for(let i=0;i<10;i++){
   const start=(await h.start('holder',WALLET,'Quest Cat '+i)).value;
-  h.app.db.prepare('UPDATE runs SET seed=3 WHERE id=?').run(start.id);
+  h.app.db.prepare('UPDATE runs SET seed=7 WHERE id=?').run(start.id);
   h.clock+=ticks/120*1000+2000;
   const request={id:start.id,ticks,inputs,score:99999999,redTokens:5,rushPickups:999,pointsMultiplier:99};
   const response=await h.request('/api/runs/finish',request);assert.equal(response.status,200);const value=response.value;results.push(value);

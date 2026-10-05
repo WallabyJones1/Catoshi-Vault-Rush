@@ -5,6 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const TAU = Math.PI * 2;
+  const SPEED_LIMITS=Object.freeze({ground:900,air:930,landing:920,rush:1280,rushFloor:1010,rushStart:1120});
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const angleDelta = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
   function random(seed) {
@@ -47,6 +48,8 @@
       this.lastPressure = 0;
       this.lastHazard = 0;
       this.lastCargo = 0;
+      this.lastSky = 0;
+      this.lastClimbBoost = 0;
       this.events = [];
       this.nextFeature = 560 + this.random() * 280;
       this.nextScenery = -50;
@@ -66,7 +69,8 @@
         x: 0, y: this.terrain(0), speed: 310, vx: 310, vy: 0,
         angle: this.slope(0), grounded: true, rail: null, ramp: null,
         held: false, heldTime: 0, airborne: 0, turns: 0, spin: 0,
-        coyote: 0.12, buffer: 0, invulnerable: 0, boost: 1.8, rush: 0, stagger: 0, recovery: 0, recoveryGap: null, flipStarted: false, takeoffBonus: 0
+        coyote: 0.12, buffer: 0, invulnerable: 0, boost: 1.8, rush: 0, stagger: 0, recovery: 0, recoveryGap: null, flipStarted: false, takeoffBonus: 0,
+        mistakes:0,lastMistake:-100,stall:0
       };
       this.time = 0;
       this.coins = 0;
@@ -232,6 +236,14 @@
         const ramp={x:start,end:start+390+this.terrainRandom(index,952733)*65,
           height:90+this.terrainRandom(index,961748941)*25,launch:290,y:this.terrain(start)};
         ramp.recovery=ramp.end+310;
+        // A balloon launch must obey the same slope budget as ordinary ramps.
+        // Otherwise its recovery curve can stack with a steep natural descent.
+        for(let tune=0;tune<8;tune++){
+          let steep=false;
+          for(let cx=start;cx<=ramp.recovery;cx+=12)if(Math.abs((this.rampY(ramp,cx+1)-this.rampY(ramp,cx-1))*.5)>2.1)steep=true;
+          if(!steep)break;
+          ramp.height*=.72;
+        }
         ramp.endY=this.rampY(ramp,ramp.end);
         const first=ramp.end+65, span=410+this.terrainRandom(index,104395303)*115;
         const gap=90+this.terrainRandom(index,122949829)*50;
@@ -251,6 +263,7 @@
         if (!clear || Math.abs(this.rampSlope(ramp,ramp.end))>1.02) continue;
         this.ramps.push(ramp);
         this.rails.push(...rails);
+        this.lastSky=start;
         return {x:start,end,ramp,rails};
       }
       return null;
@@ -269,17 +282,29 @@
       this.nextHeartSite=cx+13500+this.terrainRandom(this.heartSites++,86028121)*8500;
     }
     touchesGroundHazard(item) { return item.hazard||['rock','crate','log'].includes(item.type); }
+    climbBoosts(start,end,index){
+      // Long climbs get an optional green jump line. Ground coasting misses
+      // it, but a player who reads the hill can preserve escape momentum.
+      for(let x=Math.max(2500,start+150);x<end-160;x+=280){
+        if(x-this.lastClimbBoost<1050||this.derivative(x)>-.12||this.terrain(x-180)-this.terrain(x+450)<140)continue;
+        if(this.ramps.some(r=>x>r.x-100&&x<r.recovery+100)||this.gaps.some(g=>x>g.x-400&&x<g.end+250))continue;
+        if(this.items.some(i=>(i.hazard||i.type==='boost'||['rock','log'].includes(i.type))&&Math.abs(i.x-x)<260))continue;
+        this.items.push({type:'boost',x,y:this.terrain(x)-105,aerial:true,climb:true,hit:false});
+        this.lastClimbBoost=x;
+      }
+    }
     nextPattern(index, x) {
       if(index===0)return 0;
       if(index===1)return this.random()<.55?7:0;
       if(index===2)return 10;
-      if(x>6500&&x-this.lastPressure>9000)return 11;
-      if(x>8500&&x-this.lastCargo>10500)return 12;
+      if(x>5500&&x-this.lastPressure>7600)return 11;
+      if(x>7000&&x-this.lastCargo>8000)return 12;
+      if(x>6500&&x-this.lastSky>13000)return 5;
       // A shuffled bag replaces the old every-third-feature gate. Distance
       // budgets stop either hazards or free scenery becoming an endless streak.
-      if(x-this.lastHazard>3200+this.terrainRandom(index,611953)*1100)return 10;
+      if(x-this.lastHazard>2400+this.terrainRandom(index,611953)*850)return 10;
       if(!this.patternBag.length){
-        this.patternBag=[0,2,3,4,5,5,7,8,9,10,11,12];
+        this.patternBag=[0,2,3,4,5,7,8,9,10,10,11,12];
         for(let i=this.patternBag.length-1;i>0;i--){const j=Math.floor(this.random()*(i+1));[this.patternBag[i],this.patternBag[j]]=[this.patternBag[j],this.patternBag[i]];}
       }
       let pattern=this.patternBag.pop();
@@ -322,9 +347,9 @@
       }
       return null;
     }
-    addCargo(x,index) {
+    addCargo(x,index,aerial=false) {
       const item={type:'cargo',x,y:this.terrain(x)-980,width:48,height:43,hazard:true,heavy:true,hit:false,
-        drop:{at:null,warning:.65,duration:2.55+this.terrainRandom(index,749129)*.45,landed:false}};
+        drop:{at:null,warning:.30,duration:.9+this.terrainRandom(index,749129)*.45,landed:false,aerial,spawnY:null}};
       this.items.push(item);this.lastCargo=x;
       return item;
     }
@@ -335,12 +360,17 @@
         const drop=item.drop;
         if(drop.at===null){
           // World-space trigger; camera size and rendering never affect replay.
-          if(item.x-p.x>Math.max(1050,p.speed*3.8)||p.x>item.x+100)continue;
-          drop.at=this.time;this.event('cargo-warning',{x:item.x});
+          if(item.x-p.x>650||p.x>item.x+100)continue;
+          // The package begins well above Catoshi, inside the visible route
+          // ahead. World coordinates keep mobile and server collisions identical.
+          drop.at=this.time;drop.spawnY=Math.min(p.y-1600,this.terrain(item.x)-1500);
+          item.y=drop.spawnY;this.event('cargo-warning',{x:item.x});
         }
         if(drop.landed)continue;
         const progress=clamp((this.time-drop.at-drop.warning)/drop.duration,0,1);
-        item.y=this.terrain(item.x)-(880*(1-progress)**2+100*(1-progress));
+        const ground=this.terrain(item.x);
+        const origin=drop.spawnY??ground-1500;
+        item.y=progress===1?ground:origin+(ground-origin)*(1-(1-progress)**1.2);
         if(progress===1){drop.landed=true;drop.landedAt=this.time;this.event('cargo-land',{x:item.x,y:item.y});}
       }
     }
@@ -409,6 +439,9 @@
             this.items.push({ type:'coin',x:cx,y:Math.min(cy,this.terrain(cx)-26),hit:false });
           }
           spacing = ramp.recovery-x+580+this.random()*270;
+          if(!redSite&&x>5800&&x-this.lastCargo>3500&&this.terrainRandom(index,440113)<.5){
+            this.addCargo(ramp.end+210+this.terrainRandom(index,440119)*210,index,true);
+          }
         } else if (pattern === 5) {
           const chain=this.balloonChain(x,index);
           if (chain) x=chain.x;
@@ -435,6 +468,10 @@
           }
           this.coinTrail(x - 100, 5, 135);
           spacing = (chain?chain.end-x:1080)+850+this.random()*250;
+          if(!redSite&&x>6500&&x-this.lastCargo>3500&&this.terrainRandom(index,440131)<.38){
+            const wire=route[Math.min(1,route.length-1)];
+            this.addCargo(wire.x+(wire.end-wire.x)*.58,index,true);
+          }
         } else if (pattern === 7) {
           this.items.push({ type: 'boost', x, y: y - 3, hit: false });
           this.coinTrail(x + 70, 8, 15);
@@ -454,11 +491,20 @@
           this.coinTrail(x-155,7,105+stage*8);
           this.coinTrail(x+175,5,15);
           spacing=680+this.random()*450;
+          // Readable rhythm pairs: separate jumps, not overlapping hitboxes.
+          const secondX=x+620+this.terrainRandom(index,55079)*230;
+          if(stage>0&&this.terrainRandom(index,55073)<Math.min(.65,.3+stage*.08)
+            &&Math.abs(this.derivative(secondX))<.45&&Math.abs(this.derivative(secondX-250))<.5){
+            this.items.push({type:'barrier',x:secondX,y:this.terrain(secondX),width:58,height:34,hazard:true,heavy:true,hit:false});
+            this.coinTrail(secondX-150,7,130);
+            this.lastHazard=secondX;spacing=secondX-x+750;
+          }
         } else if ((pattern === 4 || pattern === 8) && x > 2400) {
           this.items.push({ type: this.random() < (biome===1?.25:.70) ? 'rock' : 'log', x, y, width:38+this.random()*18,height:23+this.random()*10,hit: false });
           this.lastHazard=x;
           this.coinTrail(x + 150, 7, 30);
         } else this.coinTrail(x, 8 + Math.floor(this.random() * 4), index % 3 === 0 ? 95 : 0);
+        this.climbBoosts(x,x+spacing,index);
         this.placeHeart(x,spacing,index);
         this.nextFeature = x+spacing;
       }
@@ -523,14 +569,14 @@
       const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
       const misaligned=p.rush<=0&&p.invulnerable<=0&&p.recovery<=0&&!p.recoveryGap&&p.airborne>.25&&p.held&&rotation>1.02;
       const badFlip=this.mode!=='trial'&&misaligned;
-      p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?850:115, p.rush>0?1080:780);
+      p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?SPEED_LIMITS.rushFloor:115, p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing);
       const rough=misaligned||p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
       if (badFlip) {
         // A mistimed flip spends one life, just like a rock. An upright
         // automatic landing, however high, does not spend a life.
-        p.speed=Math.max(115,p.speed*.55);p.stagger=.65;p.recovery=2;p.invulnerable=1.25;
+        this.mistake();p.speed=Math.max(25,p.speed*(p.mistakes>1?.32:.48));p.stagger=.65;p.recovery=1.05;p.invulnerable=.9;
         this.combo=1;this.slowTime=0;
-        if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
+        if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
         this.lives--;
         this.event('stumble',{x:p.x,y,angle,heavy:true,material:'stone',kind:'flip',lifeLost:true,lives:this.lives,fatal:this.lives===0});
         if(this.lives===0){p.y=y;this.crash('OUT OF LIVES');return;}
@@ -539,7 +585,7 @@
         // kill a rider whose board is upright; keep the impact readable.
         p.speed=Math.max(150,p.speed*.72);p.stagger=Math.max(p.stagger,.38);
         p.recovery=Math.max(p.recovery,1.2);this.combo=1;this.slowTime=0;
-        if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
+        if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
         this.event('stumble',{x:p.x,y,angle,heavy:false,material:'stone',kind:'landing'});
       }else if(p.rush<=0&&impact>650)p.speed*=.8;
       p.y = y;
@@ -553,7 +599,7 @@
         this.score += 150 * this.combo;
       }
       if(p.takeoffBonus&&!rough){
-        this.score+=p.takeoffBonus;p.speed=Math.min(p.rush>0?1080:780,p.speed+45);
+        this.score+=p.takeoffBonus;p.speed=Math.min(p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing,p.speed+45);
         this.event('trick',{text:'STUCK THE LANDING',points:p.takeoffBonus});
       }
       p.takeoffBonus=0;
@@ -563,7 +609,7 @@
           this.combo = Math.min(8, this.combo + turns);
           const points = 500 * turns * this.combo;
           this.score += points;
-          p.speed = Math.min(p.rush>0?1080:780, p.speed + 50 * turns);
+          p.speed = Math.min(p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing, p.speed + 50 * turns);
           p.boost = 1.6;
           this.event('trick', { text: turns > 1 ? `${turns}× BACKFLIP` : 'BACKFLIP', points });
         } else if (impact < 420) {
@@ -578,6 +624,11 @@
       p.flipStarted = false;
       if (p.buffer > 0) this.jump();
     }
+    mistake(){
+      const p=this.player;
+      p.mistakes=this.time-p.lastMistake<7?Math.min(3,p.mistakes+1):1;
+      p.lastMistake=this.time;p.stall=0;
+    }
     stumble(item) {
       const p = this.player;
       // Consume a collision once, including during recovery. No obstacle can
@@ -586,18 +637,19 @@
       item.hit = true;
       if (p.invulnerable > 0 || p.rush > 0) return;
       const heavy=Boolean(item.heavy||item.hazard),before=p.speed;
-      p.speed=Math.min(before,clamp(before*(heavy?.58:.72),200,heavy?520:600));
+      this.mistake();
+      p.speed=Math.min(before,clamp(before*(p.mistakes>1?.30:heavy?.50:.62),p.mistakes>1?20:115,heavy?460:540));
       p.vx*=p.speed/Math.max(1,before);
       if(!p.grounded)p.vy*=.8;
       p.boost=0;
-      p.invulnerable=1.25;
+      p.invulnerable=.9;
       p.stagger=heavy?.42:.28;
-      p.recovery=heavy?1.5:1.1;
+      p.recovery=heavy?1.15:.9;
       p.spin=0;p.turns=0;p.takeoffBonus=0;
       // Preserve the slowdown without allowing the same collision to cause
       // a lethal landing or an immediate catch by an already nearby hound.
       if(!p.grounded)p.vy=clamp(p.vy,-280,350);
-      if(this.dog.active)this.dog.distance=Math.max(180,this.dog.distance);
+      if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
       this.combo = 1;
       this.slowTime = 0;
       this.lives--;
@@ -648,16 +700,18 @@
       p.rush = Math.max(0, p.rush - dt);
       p.stagger = Math.max(0, p.stagger - dt);
       p.recovery = Math.max(0,p.recovery-dt);
+      if(this.time-p.lastMistake>7)p.mistakes=0;
       if(p.recoveryGap&&p.x>=p.recoveryGap.end)p.recoveryGap=null;
       if (p.held) p.heldTime += dt;
       const previousX = p.x, previousY = p.y;
       if (p.grounded) {
         let angle = p.rail ? this.railSlope(p.rail, p.x) : p.ramp ? this.rampSlope(p.ramp, p.x) : this.slope(p.x);
         const sand=p.rail||p.rush>0||p.recovery>0?0:this.sandAt(p.x);
-        const acceleration = 620 * Math.sin(angle) * 0.45 + 24 - p.speed * 0.06 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?105:0)
-          -sand*(105+p.speed*.075);
-        const maximum=p.rush>0?1080:Math.max(760,p.speed-360*dt);
-        p.speed = clamp(p.speed + acceleration * dt, p.rush>0?850:p.stagger>0?160:angle>=-.08?75:200, maximum);
+        const acceleration = 620 * Math.sin(angle) * 0.45 + 20 - p.speed * 0.075 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?48:0)
+          -sand*(120+p.speed*.09);
+        const maximum=p.rush>0?SPEED_LIMITS.rush:Math.max(SPEED_LIMITS.ground,p.speed-360*dt);
+        const minimum=this.mode==='trial'?65:p.x<2400?200:p.mistakes>1?0:angle>=-.08?60:110;
+        p.speed = clamp(p.speed + acceleration * dt, p.rush>0?SPEED_LIMITS.rushFloor:minimum, maximum);
         p.vx = p.speed * Math.cos(angle);
         p.vy = p.speed * Math.sin(angle);
         p.x += p.vx * dt;
@@ -689,7 +743,7 @@
       } else {
         p.airborne += dt;
         p.vy += 690 * dt;
-        p.vx = clamp(p.vx + dt * 7, p.rush>0?820:85, p.rush>0?1080:Math.max(790,p.vx-360*dt));
+        p.vx = clamp(p.vx + dt * 7, p.rush>0?1000:85, p.rush>0?SPEED_LIMITS.rush:Math.max(SPEED_LIMITS.air,p.vx-360*dt));
         p.x += p.vx * dt;
         p.y += p.vy * dt;
         p.speed = p.vx;
@@ -751,32 +805,35 @@
           item.hit=true;
           if(item.type==='rush'){
             this.rushPickups++;p.rush=7;p.invulnerable=7;p.stagger=0;
-            p.speed=950;p.vx=Math.max(p.vx,900);this.slowTime=0;this.dog.active=false;this.dog.warning=false;
+            p.speed=SPEED_LIMITS.rushStart;p.vx=Math.max(p.vx,1060);p.mistakes=0;p.stall=0;this.slowTime=0;this.dog.active=false;this.dog.warning=false;
             this.event('rush',{x:item.x,y:item.y,seconds:7});
           }else if(this.redTokens<5){this.redTokens++;this.event('redRush',{x:item.x,y:item.y,total:this.redTokens});}
         } else if (item.type === 'boost' && Math.abs(item.y - (p.y-(item.aerial?17:0))) < (item.aerial?34:22)) {
           item.hit = true;
           this.boostsCollected++;
-          p.speed = Math.min(p.rush>0?1080:760, Math.max(item.escape?360:0,p.speed + 160));
+          p.speed = Math.min(p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.ground, Math.max(item.escape?360:0,p.speed + 185));
           p.vx += 100;
           p.boost = 2.5;
+          p.stall=0;p.mistakes=Math.max(0,p.mistakes-1);
           this.event('trick', { text: 'RUSH BOOST', points: 80 });
           this.score += 80;
         } else if(this.touchesObstacle(item,previousX))this.stumble(item);
       }
       this.score += (p.x - previousX) * 0.055;
       const pressure=this.sandAt(p.x)>.15;
-      const lowSpeed=pressure?260:160;
+      const threat=clamp((p.x-2400)/22000,0,1);
+      const lowSpeed=pressure?280:p.x<2400?160:210+threat*35;
       this.slowTime = p.rush>0||p.recovery>0?0:p.speed < lowSpeed ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
       const wasActive = this.dog.active;
-      if (this.mode!=='trial'&&!wasActive && p.rush<=0&&this.slowTime > 1.0) {
+      if (this.mode!=='trial'&&!wasActive && p.rush<=0&&this.slowTime > .9) {
         this.dog.active = true;
-        this.dog.distance = 330;
+        this.dog.distance = 240-threat*35;
         this.event('warning', { text: 'LOW SPEED · THE HOUND IS NEAR' });
       }
       if (this.dog.active) {
-        this.dog.distance += (p.recovery>0||p.recoveryGap?155:clamp((p.speed-(pressure?270:230))*.8,-85,155)) * dt;
-        this.dog.warning = p.recovery<=0&&!p.recoveryGap&&(p.speed < (pressure?270:200)||this.dog.distance<150);
+        this.dog.distance += (p.recovery>0||p.recoveryGap?0:clamp((p.speed-(pressure?305:260+threat*30))*.9,-125,155)) * dt;
+        if(p.recovery>0||p.recoveryGap)this.dog.distance=Math.max(90,this.dog.distance);
+        this.dog.warning = p.recovery<=0&&!p.recoveryGap&&(p.speed < (pressure?305:250)||this.dog.distance<175);
         const stretch=this.encounters.find(e=>p.x>e.flatStart&&p.x<e.end);
         if(stretch)stretch.chased=true;
         if (this.dog.distance > 520) {
@@ -784,8 +841,11 @@
           const escape=stretch||this.encounters.find(e=>e.chased&&!e.cleared&&p.x>=e.end&&p.x<e.end+1600);
           if(escape?.chased&&!escape.cleared){escape.cleared=true;this.score+=150;this.event('escape',{x:p.x,y:p.y,points:150});}
         }
-        if (this.dog.distance < 24) this.crash('THE HOUND CAUGHT UP');
+        const reachable=p.grounded||!this.gapAt(p.x)&&this.terrain(p.x)-p.y<48;
+        if(this.dog.distance<24){if(reachable)this.crash('THE HOUND CAUGHT UP');else this.dog.distance=24;}
       }
+      p.stall=this.mode!=='trial'&&p.rush<=0&&p.recovery<=0&&p.grounded&&p.speed<65&&p.mistakes>0?p.stall+dt:Math.max(0,p.stall-dt*2);
+      if(p.stall>2.4)this.crash('LOST MOMENTUM');
       this.generate(2600);
       this.items = this.items.filter(i => !i.hit && i.x > p.x - 300);
       this.rails = this.rails.filter(r => r.end > p.x - 600);
@@ -799,11 +859,11 @@
   // Hand-authored, versioned courses: identical terrain, ramps and boost
   // locations for every player, with no prize or endless-run RNG involved.
   const TRIAL_COURSES = [
-    {id:1,name:'DUNE DASH',theme:0,gaps:[[4200,350]],legs:[[900,160],[1000,380],[850,-170],[1200,520],[800,30],[1250,650]]},
-    {id:2,name:'CANYON FLOW',theme:0,gaps:[[3720,370]],legs:[[800,130],[1500,900],[900,-380],[1100,60],[1700,1150],[900,-240],[1500,470],[1600,860]]},
-    {id:3,name:'FOREST FLIGHT',theme:1,gaps:[[6900,430],[13750,320]],legs:[[800,150],[1400,-350],[2200,1700],[1400,-700],[1800,70],[2500,1800],[1300,-650],[1900,1400],[1700,260]]},
-    {id:4,name:'RIDGE RUNNER',theme:2,gaps:[[7950,480],[19800,380]],legs:[[1000,180],[2000,-720],[2200,2200],[1700,-900],[2600,180],[2600,2300],[2000,-1000],[2700,2400],[1800,-450],[2400,1850]]},
-    {id:5,name:'MIDNIGHT SUMMIT',theme:3,gaps:[[8120,530],[18600,580]],legs:[[1100,160],[1900,-900],[2100,2300],[1800,-1100],[3200,120],[2800,3000],[1900,-900],[2700,2000],[2600,60],[2500,-1400],[2800,3300],[2600,800]]}
+    {id:1,name:'DUNE DASH',theme:0,gaps:[[4200,350],[7960,360]],legs:[[900,160],[1000,380],[850,-170],[1200,520],[800,30],[1250,650],[650,-160],[1000,650],[850,40]]},
+    {id:2,name:'CANYON FLOW',theme:0,gaps:[[3720,370],[14400,440]],legs:[[800,130],[1500,900],[900,-380],[1100,60],[1700,1150],[900,-240],[1500,470],[1600,860],[900,-360],[1600,1250],[2600,80]]},
+    {id:3,name:'FOREST FLIGHT',theme:1,gaps:[[6900,430],[13750,320],[18400,460]],legs:[[800,150],[1400,-350],[2200,1700],[1400,-700],[1800,70],[2500,1800],[1300,-650],[1900,1400],[1700,260],[1200,-520],[1900,1600],[1500,90]]},
+    {id:4,name:'RIDGE RUNNER',theme:2,gaps:[[7950,480],[19800,380],[24900,540]],legs:[[1000,180],[2000,-720],[2200,2200],[1700,-900],[2600,180],[2600,2300],[2000,-1000],[2700,2400],[1800,-450],[2400,1850],[1500,-850],[2000,2250],[1700,100]]},
+    {id:5,name:'MIDNIGHT SUMMIT',theme:3,gaps:[[8120,530],[18600,580],[33000,610]],legs:[[1100,160],[1900,-900],[2100,2300],[1800,-1100],[3200,120],[2800,3000],[1900,-900],[2700,2000],[2600,60],[2500,-1400],[2800,3300],[2600,800],[1700,-1000],[2600,3000],[2300,100]]}
   ].map(course=>Object.freeze({...course,distance:course.legs.reduce((sum,[length])=>sum+length,0),gaps:Object.freeze(course.gaps.map(gap=>Object.freeze(gap))),legs:Object.freeze(course.legs.map(leg=>Object.freeze(leg)))}));
   Object.freeze(TRIAL_COURSES);
   class Trial extends Run {
@@ -856,5 +916,5 @@
       }
     }
   }
-  return { Run, Trial, TRIAL_COURSES, clamp, angleDelta, TAU, VERSION: 'flow-web-12-single-player-polish' };
+  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-13-ghost-challenge' };
 });
