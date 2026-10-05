@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-11';
+  const ENGINE='flow-web-12-single-player-polish';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
@@ -91,6 +91,19 @@
     rememberHolderName(rewardWallet,displayName);updateStatus(ticket);
     return ticket;
   }
+  async function prepareTrial(level){
+    submissionGeneration++;lastResult=null;
+    const name=$('holder-name').value.trim()||'Runner',wallet=$('wallet').value.trim();
+    entryWallet=wallet;
+    await getConfig();
+    const ticket=await api('trials/start',{level,name,wallet:wallet||null,engine:ENGINE});
+    rememberHolderName(wallet,name);
+    return ticket;
+  }
+  async function submitTrial(ticket,ticks,inputs){
+    if(!ticket?.id)throw Error('Speed Trial not reserved. Please start again.');
+    return api('trials/finish',{id:ticket.id,ticks,inputs});
+  }
   async function submit(ticket,ticks,inputs){
     lastResult=null;
     const generation=++submissionGeneration;
@@ -118,8 +131,10 @@
     const checked=result?.run;
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
     const kind=checked?'checked weekly run':'score pending verification';
-    const text=`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
-    const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/':'');
+    const text=run.mode==='trial'
+      ?`I finished Speed Trial ${run.trial.id}: ${run.trial.name} in ${((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3)}s in Catoshi Vault Rush! (${checked?'Replay checked':'Time pending verification'}) Can you beat it? #Catoshi`
+      :`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
+    const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/'+(run.mode==='trial'?'?trial='+run.trial.id:''):'');
     $('share-x').href='https://twitter.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});
     $('share-x').hidden=false;
     $('copy-score').onclick=async()=>{
@@ -191,6 +206,67 @@
     if(document.hidden){clearInterval(boardTimer);boardTimer=null;}
     else if(!$('leaderboard-panel').hidden){board();boardTimer=setInterval(board,10000);}
   });
+  let trialBoardLevel=1,trialBoardGeneration=0,trialBoardTimer=null,trialPreviousFocus=null;
+  const trialCourses=typeof VaultRush!=='undefined'?VaultRush.TRIAL_COURSES||[]:[];
+  function trialTime(ms){
+    return String(Math.floor(ms/60000)).padStart(2,'0')+':'+String(Math.floor(ms/1000)%60).padStart(2,'0')+'.'+String(ms%1000).padStart(3,'0');
+  }
+  async function trialBoard(){
+    const generation=++trialBoardGeneration,level=trialBoardLevel;
+    const course=trialCourses.find(value=>value.id===level);
+    $('trial-board-course').textContent=course?course.name+' · '+Math.floor(course.distance/10)+'m':'';
+    for(const button of $('trial-board-tabs').querySelectorAll('button'))button.setAttribute('aria-pressed',String(Number(button.dataset.level)===level));
+    try{
+      const value=await api('trials/leaderboard?level='+level);
+      if(generation!==trialBoardGeneration)return;
+      if(value.engine!==ENGINE)throw Error('Reload to get the latest courses.');
+      const body=$('trial-board-rows');body.textContent='';
+      for(const entry of value.entries){
+        const row=document.createElement('tr'),rank=document.createElement('td'),name=document.createElement('td'),time=document.createElement('td');
+        const badge=document.createElement('span');badge.className='rank-badge';badge.textContent=entry.rank;rank.appendChild(badge);
+        const title=document.createElement('strong');title.className='rank-name';title.textContent=entry.name;name.appendChild(title);
+        if(entry.wallet){const detail=document.createElement('small');detail.className='rank-detail rank-wallet';detail.textContent=entry.wallet;name.appendChild(detail);}
+        time.textContent=trialTime(entry.timeMs);
+        row.appendChild(rank);row.appendChild(name);row.appendChild(time);body.appendChild(row);
+      }
+      if(!value.entries.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=3;cell.className='board-empty';cell.textContent='Be the first to finish this track.';row.appendChild(cell);body.appendChild(row);}
+      $('trial-board-status').className='status board-live';
+      $('trial-board-status').textContent='LIVE · '+new Date(value.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+    }catch(error){if(generation===trialBoardGeneration){$('trial-board-status').className='status error';$('trial-board-status').textContent='Could not refresh. '+error.message;}}
+  }
+  function selectTrialBoard(level){
+    trialBoardLevel=level;$('trial-board-rows').textContent='';$('trial-board-status').textContent='Loading times…';trialBoard();
+  }
+  function openTrialBoard(level=1){
+    if(!trialCourses.some(course=>course.id===level))level=1;
+    trialPreviousFocus=document.activeElement;$('trial-board-panel').hidden=false;
+    $('close-trial-board').focus();selectTrialBoard(level);
+    clearInterval(trialBoardTimer);trialBoardTimer=setInterval(trialBoard,10000);
+  }
+  function closeTrialBoard(){
+    trialBoardGeneration++;$('trial-board-panel').hidden=true;
+    clearInterval(trialBoardTimer);trialBoardTimer=null;trialPreviousFocus?.focus();
+  }
+  for(const course of trialCourses){
+    const button=document.createElement('button');button.type='button';button.dataset.level=String(course.id);button.textContent=String(course.id).padStart(2,'0');
+    button.setAttribute('aria-label',course.name+' best times');button.setAttribute('aria-pressed',String(course.id===1));
+    button.addEventListener('click',()=>selectTrialBoard(course.id));$('trial-board-tabs').appendChild(button);
+  }
+  $('close-trial-board').addEventListener('click',closeTrialBoard);
+  $('trial-board-refresh').addEventListener('click',trialBoard);
+  document.addEventListener('keydown',event=>{
+    if($('trial-board-panel').hidden)return;
+    if(event.key==='Escape'){event.preventDefault();closeTrialBoard();}
+    if(event.key==='Tab'){
+      const buttons=Array.from($('trial-board-panel').querySelectorAll('button')),first=buttons[0],last=buttons[buttons.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus();}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus();}
+    }
+  });
+  document.addEventListener('visibilitychange',()=>{
+    if(document.hidden){clearInterval(trialBoardTimer);trialBoardTimer=null;}
+    else if(!$('trial-board-panel').hidden){trialBoard();trialBoardTimer=setInterval(trialBoard,10000);}
+  });
   $('check-day').addEventListener('click',async()=>{
     const address=$('wallet').value.trim(),button=$('check-day');
     button.disabled=true;$('wallet-status').textContent='Loading your progress…';
@@ -202,6 +278,6 @@
     }catch(error){$('wallet-status').textContent=error.message;$('wallet-status').className='status error';}
     finally{button.disabled=false;}
   });
-  window.RushOnline={prepare,submit,share,getConfig,progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();$('wallet').value=entryWallet;restoreHolderName(entryWallet);},wallet:()=>entryWallet};
+  window.RushOnline={prepare,submit,prepareTrial,submitTrial,openTrialBoard,share,getConfig,cancelSubmission:()=>{submissionGeneration++;},progress:async wallet=>{const value=await api('player-status?'+new URLSearchParams({wallet:wallet.trim()}),null,15000);updateStatus(value);return value;},setWallet:wallet=>{entryWallet=wallet.trim();$('wallet').value=entryWallet;restoreHolderName(entryWallet);},wallet:()=>entryWallet};
   if(location.protocol!=='file:')getConfig().catch(()=>{});
 })();

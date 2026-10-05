@@ -174,7 +174,7 @@ test('one Play button, touch/keyboard, pause/resume, failed server start and vau
   let startsFail=false,prepares=0;const ticket={id:'ticket',wallet:null,seed:123,maxTicks:72000};
   window.RushOnline={prepare:async()=>{prepares++;if(startsFail)throw Error('offline');return ticket;},submit:async()=>null,share(){},setWallet(){}};
   window.RushSound={unlock(){},setPlaying(){},effect(){sounds++;},burst(){bursts++;}};
-  const context={document,window,console,setTimeout,clearTimeout,performance:{now:()=>now},VaultRush:{Run:class extends Run{constructor(seed){super(seed);createdRun=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
+  const context={document,window,console,setTimeout,clearTimeout,location:{search:''},URLSearchParams,performance:{now:()=>now},VaultRush:{Run:class extends Run{constructor(seed){super(seed);createdRun=this;}}},VaultRushRenderer:{loadAssets:async()=>({}),Renderer:class{reset(){}draw(){}update(){}handle(){}breakout(){}}},requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{frame=null;}};
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
   assert(!elements['practice-button']&&!elements['board-practice']);
   assert(html.indexOf('id="holder-name"')<html.indexOf('id="wallet"'),'wallet appears under the name');
@@ -319,7 +319,7 @@ test('unattended runs lose momentum and usually fail; timed taps avoid early obs
   assert(bumped>=294,'idle play should reliably cost momentum');
   assert(clearable>=294,'timed taps should clear early hazards in at least 98% of sampled routes; crest landings also require control');
   assert(routes.size>=290,'seeded terrain shapes, lengths and biome sequences differ across rounds');
-  assert.deepEqual([...hazards].sort(),['barrier','cart','log','rock','spikes','stack']);
+  assert.deepEqual([...hazards].sort(),['barrier','cargo','cart','log','rock','spikes','stack']);
 });
 
 test('ramps join ground with continuous height, slope and curvature and no step onto the kicker',()=>{

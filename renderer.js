@@ -17,9 +17,11 @@
     obstacles: 'terrain-obstacles-v1.png',
     rush: 'rush-pickups-v2.png',
     extras: 'catoshi-actions-extra-v1.png',
-    details: 'sky-terrain-details-v1.png'
+    details: 'sky-terrain-details-v1.png',
+    cargo: 'cargo-parachute-v1.png'
   };
-  const optionalAssets = new Set(['extras','details']);
+  const optionalAssets = new Set(['extras','details','cargo']);
+  const cargoParts = [[45,181,702,371],[848,239,344,317],[42,871,719,230],[838,809,380,299]];
   // Supplemental atlas crops are generated from the measured alpha bounds.
   const extraCharacters = [[20,75,344,305],[404,75,344,305],[788,112,344,268],[1172,35,344,345],[42,420,300,360],[404,425,344,355],[788,450,344,330],[1172,457,344,323]];
   const details = [[20,279,344,101],[404,238,344,142],[788,238,344,142],[1172,298,344,82],[20,586,344,194],[404,541,344,239],[788,468,344,312],[1172,652,344,128],[32,820,319,360],[404,997,344,183],[788,983,344,197],[1172,941,344,239]];
@@ -121,6 +123,8 @@
       if(event.type==='rush')this.burst(event.x,event.y,'#e8a13a',20,190);
       if(event.type==='redRush')this.burst(event.x,event.y,'#e03b3b',12,100);
       if(event.type==='heart')this.burst(event.x,event.y,'#3ddc54',12,90);
+      if(event.type==='cargo-land')this.burst(event.x,event.y,'#8d8880',12,95);
+      if(event.type==='escape')this.burst(event.x,event.y-10,'#3ddc54',10,100);
       if (event.type === 'land') { this.landPose = .22; this.burst(event.x, event.y, '#8d8880', 8); }
       if(event.type==='jump'){
         this.jumpPose=.18;this.burst(event.x,event.y,'#8d8880',5,45);
@@ -238,14 +242,15 @@
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
-      const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011;
+      const upcomingDrop=p.grounded?Math.max(0,run.terrain(p.x+clamp(p.speed*.85,280,670))-p.y):0;
+      const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011-Math.min(.045,upcomingDrop*.0001);
       const landingZoom=drop>this.height*.45?this.height*.50/(drop+70):.94;
       const zoom = clamp(Math.min(speedZoom,landingZoom),portrait?.52:.58,.94);
       // Reveal a deep landing promptly, then return to normal scale gradually.
       const ease = 1 - Math.exp(-dt * (zoom<this.camera.zoom?6:2.8));
       this.camera.zoom += (zoom - this.camera.zoom) * ease;
       // Keep the hero inside the frame even on the highest balloon routes.
-      const lookDown=Math.min(Math.max(altitude*.38,drop*.40),this.height*.32/this.camera.zoom);
+      const lookDown=Math.min(Math.max(altitude*.38,drop*.40,upcomingDrop*.22),this.height*.32/this.camera.zoom);
       const fallLead=p.grounded?0:clamp(p.vy*.14,0,this.height*.07/this.camera.zoom);
       const targetY = p.y + lookDown + fallLead - this.height * (portrait?.58:.62) / this.camera.zoom;
       this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 7));
@@ -298,6 +303,57 @@
       ctx.lineTo(half*.1,y+2);ctx.lineTo(half*.65,y-2);ctx.lineTo(half,y+1);ctx.stroke();
       if(good){ctx.beginPath();ctx.moveTo(4,y-6);ctx.lineTo(9,y-3);ctx.lineTo(4,y);ctx.stroke();}
       ctx.restore();
+    }
+    cargoCrate(x,y,width,height,broken=false) {
+      if(this.images.cargo){
+        const crop=cargoParts[broken?3:1];
+        this.ctx.drawImage(this.images.cargo,...crop,x-width/2,y-height,width,height);
+      }else{
+        // Missing optional art must not make a real collider invisible.
+        this.obstacle(5,x,y,width,height);this.groundMark(width,height);
+      }
+    }
+    fallingCargo(run,item) {
+      const ctx=this.ctx,drop=item.drop;
+      if(drop.at===null)return;
+      const age=run.time-drop.at,ground=run.terrain(item.x),width=item.width,height=item.height;
+      // A warning/shadow is present from the trigger, including while the
+      // package is above the viewport. It is never a second collider.
+      if(!drop.landed){
+        ctx.save();ctx.translate(item.x,ground);ctx.rotate(run.slope(item.x));
+        ctx.strokeStyle='rgba(224,59,59,.60)';ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(-29,-3);ctx.lineTo(-10,-3);ctx.moveTo(10,-3);ctx.lineTo(29,-3);ctx.stroke();
+        ctx.fillStyle='rgba(10,9,8,.35)';ctx.beginPath();ctx.ellipse(0,1,clamp(34-(ground-item.y)*.015,13,34),4,0,0,Math.PI*2);ctx.fill();
+        ctx.restore();
+        const markerY=Math.max(this.camera.y+52/this.camera.zoom,Math.min(item.y-height-130,ground-160));
+        ctx.save();ctx.translate(item.x,markerY);ctx.globalAlpha=.7+.2*Math.sin(this.clock*8);ctx.fillStyle='#e03b3b';
+        ctx.beginPath();ctx.moveTo(-5,-4);ctx.lineTo(5,-4);ctx.lineTo(0,3);ctx.closePath();ctx.fill();ctx.restore();
+      }
+      if(age<drop.warning)return;
+      const collapse=drop.landed?clamp((run.time-drop.landedAt)/.65,0,1):0;
+      const sway=Math.sin(age*2.5+item.x*.01)*10;
+      const anchorY=item.y-height-62*(1-collapse),canopyWidth=96*(1-collapse*.10);
+      if(collapse<1){
+        ctx.save();ctx.globalAlpha=1-collapse*.5;
+        ctx.strokeStyle='#8d8880';ctx.lineWidth=.9;
+        for(const side of [-1,1]){
+          ctx.beginPath();ctx.moveTo(item.x+side*width*.38,item.y-height+5);
+          ctx.lineTo(item.x+sway+side*canopyWidth*.41,anchorY-8);ctx.stroke();
+        }
+        ctx.translate(item.x+sway,anchorY);ctx.rotate(Math.sin(age*2.5)*.04);
+        if(this.images.cargo)this.sprite(this.images.cargo,cargoParts[0],0,0,canopyWidth,false);
+        else {ctx.fillStyle='#70352e';ctx.beginPath();ctx.ellipse(0,-15,48,27,0,Math.PI,0);ctx.closePath();ctx.fill();}
+        ctx.restore();
+      }else if(run.time-drop.landedAt<2&&this.images.cargo){
+        ctx.save();ctx.globalAlpha=Math.max(0,1-(run.time-drop.landedAt-.65)/1.35)*.65;
+        this.sprite(this.images.cargo,cargoParts[2],item.x+27,ground+2,70,false);ctx.restore();
+      }
+      ctx.save();ctx.translate(item.x,item.y);
+      if(drop.landed){
+        ctx.rotate(run.slope(item.x));
+        const bounce=Math.max(0,1-(run.time-drop.landedAt)/.22);ctx.scale(1+bounce*.12,1-bounce*.10);
+      }else ctx.rotate(Math.sin(age*2.5)*.045);
+      this.cargoCrate(0,0,width,height);ctx.restore();
     }
     groundPlacement(run,x,width,angle=0,feet=[[-.45,.45]]) {
       const cosine=Math.cos(angle),sine=Math.sin(angle),surface=run.terrain(x);
@@ -445,6 +501,23 @@
         start = Math.max(start, gap.end);
       }
       drawSection(start, right);
+      // Surface language: soft sand is hatched gold-brown, safe launch lips
+      // and speed pads are green, cliff edges and hazards carry restrained red.
+      for(const section of run.encounters){
+        const a=Math.max(left,section.flatStart),b=Math.min(right,section.sandEnd);
+        if(b<=a)continue;
+        ctx.save();ctx.strokeStyle='rgba(232,161,58,.26)';ctx.lineWidth=2;
+        for(let x=Math.ceil(a/24)*24;x<b;x+=24){const y=run.terrain(x);ctx.beginPath();ctx.moveTo(x,y+7);ctx.lineTo(x+9,y+12);ctx.stroke();}
+        ctx.strokeStyle='rgba(232,161,58,.32)';ctx.lineWidth=1;ctx.setLineDash([8,10]);
+        ctx.beginPath();ctx.moveTo(a,run.terrain(a)+1);for(let x=a+10;x<b;x+=10)ctx.lineTo(x,run.terrain(x)+1);ctx.stroke();ctx.restore();
+      }
+      for(const gap of run.gaps){
+        if(gap.end<left||gap.x>right)continue;
+        for(const x of [gap.x-18,gap.end+12]){
+          ctx.strokeStyle='#8d8880';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,run.terrain(x)+1);ctx.lineTo(x,run.terrain(x)-27);ctx.stroke();
+          ctx.fillStyle='#e03b3b';ctx.beginPath();ctx.moveTo(x,run.terrain(x)-27);ctx.lineTo(x+11,run.terrain(x)-22);ctx.lineTo(x,run.terrain(x)-17);ctx.closePath();ctx.fill();
+        }
+      }
       for (const r of run.ramps) {
         if (r.end < left || r.x > right) continue;
         // The ramp is already part of the real ground, including its smooth
@@ -452,6 +525,9 @@
         ctx.beginPath();ctx.moveTo(r.end-90,run.terrain(r.end-90));
         for(let x=r.end-84;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
         ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(61,220,84,.65)';ctx.lineWidth=2;ctx.stroke();
+        ctx.save();ctx.translate(r.end-35,run.terrain(r.end-35)-5);ctx.rotate(run.slope(r.end-35));
+        ctx.strokeStyle='#3ddc54';ctx.lineWidth=1.8;
+        for(const offset of [-15,0]){ctx.beginPath();ctx.moveTo(offset-5,-6);ctx.lineTo(offset,-3);ctx.lineTo(offset-5,0);ctx.stroke();}ctx.restore();
       }
     }
     rails(run, left, right) {
@@ -492,6 +568,8 @@
       if (left < 50 && right > -220) this.vault(run);
       for (const scenery of run.scenery) {
         if (scenery.x < left || scenery.x > right)continue;
+        if(run.items.some(item=>!item.hit&&(run.touchesGroundHazard(item)||item.type==='boost')&&Math.abs(item.x-scenery.x)<115))continue;
+        if(run.ramps.some(r=>Math.abs(r.end-scenery.x)<125))continue;
         const biome=run.biome(scenery.x),index=scenery.type==='pylon'?1:7;
         const choice=Math.floor(run.terrainRandom(Math.floor(scenery.x),712697)*3);
         const decoration=[ [5,6,10], [8,10,6], [9,7,11], [11,9,10] ][biome][choice];
@@ -514,9 +592,18 @@
       ctx.globalAlpha = 1;
       this.rails(run,left,right);
       this.terrain(run,left,right,bottom);
+      if(run.trial&&run.trial.distance>left&&run.trial.distance<right){
+        const x=run.trial.distance,y=run.terrain(x);
+        ctx.save();ctx.translate(x,y);ctx.strokeStyle='#8d8880';ctx.lineWidth=2;
+        ctx.beginPath();ctx.moveTo(0,1);ctx.lineTo(0,-110);ctx.stroke();
+        ctx.fillStyle='#f26b35';ctx.fillRect(0,-110,74,25);
+        ctx.fillStyle='#0a0908';ctx.font='bold 11px sans-serif';ctx.fillText('FINISH',9,-93);
+        ctx.fillStyle='#3ddc54';ctx.fillRect(-5,-4,10,4);ctx.restore();
+      }
       for (const item of run.items) {
         if (item.hit || item.x < left || item.x > right)continue;
-        if(item.type==='coin'){
+        if(item.type==='cargo')this.fallingCargo(run,item);
+        else if(item.type==='coin'){
           const width=portrait?17:12,spin=.82+.18*Math.cos(run.time*3+item.x*.03);
           ctx.drawImage(this.images.coin,item.x-width*spin/2,item.y-width/2,width*spin,width);
         }
@@ -539,9 +626,11 @@
           ctx.beginPath();ctx.arc(0,0,width*.55*pulse,-.8,.9);ctx.stroke();ctx.restore();
         }
         else if(item.type==='boost') {
-          this.groundShadow(run,item.x,52);
-          const mount=this.groundPlacement(run,item.x,52,run.slope(item.x));
-          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);this.groundMark(52,16,true);ctx.restore();
+          if(!item.aerial)this.groundShadow(run,item.x,52);
+          const mount=item.aerial?{x:item.x,y:item.y+8,angle:-.15}:this.groundPlacement(run,item.x,52,run.slope(item.x));
+          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);this.groundMark(52,16,true);
+          ctx.strokeStyle='#3ddc54';ctx.lineWidth=2;
+          for(const offset of [-10,0,10]){ctx.beginPath();ctx.moveTo(offset-4,-20);ctx.lineTo(offset+1,-16);ctx.lineTo(offset-4,-12);ctx.stroke();}ctx.restore();
         } else {
           const art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
           this.groundShadow(run,item.x,item.width||38);
@@ -563,7 +652,8 @@
         const t=1-item.life/.42,art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
         ctx.save();ctx.globalAlpha=(1-t)*.8;ctx.translate(item.x+t*18,item.y-t*9);
         ctx.rotate(item.angle+t*.35);
-        if(art!==undefined){this.obstacle(art,0,1,item.width||38,item.height||28);this.groundMark(item.width||38,item.height||28);}
+        if(item.type==='cargo')this.cargoCrate(0,1,item.width*1.25,item.height*.7,true);
+        else if(art!==undefined){this.obstacle(art,0,1,item.width||38,item.height||28);this.groundMark(item.width||38,item.height||28);}
         ctx.restore();
       }
       for(const q of this.particles){
@@ -627,6 +717,14 @@
       }
       this.sprite(extra>=0?this.images.extras:this.images.characters,extra>=0?extraCharacters[extra]:characters[frame],0,0,portrait?60:40,false);
       ctx.restore();ctx.restore();ctx.globalAlpha=1;
+      if(run.dog.active&&run.dog.warning){
+        const x=(p.x-run.dog.distance-cam.x)*cam.zoom;
+        if(x<14){
+          const y=clamp((p.y-cam.y)*cam.zoom-16,H*.32,H*.8);
+          ctx.save();ctx.fillStyle='#e03b3b';ctx.globalAlpha=.55+.2*Math.sin(this.clock*7);
+          ctx.beginPath();ctx.moveTo(8,y);ctx.lineTo(17,y-6);ctx.lineTo(17,y+6);ctx.closePath();ctx.fill();ctx.restore();
+        }
+      }
       if(this.intro>0 && this.intro<=BREACH_REMAINING && this.intro>BREACH_REMAINING-.09){
         ctx.fillStyle='rgba(242,239,233,'+((this.intro-(BREACH_REMAINING-.09))/.09*.07)+')';ctx.fillRect(0,0,W,H);
       }

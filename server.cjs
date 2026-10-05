@@ -7,6 +7,7 @@ const {DatabaseSync}=require('node:sqlite');
 const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tokenBalance,escapeHtml}=require('./security.cjs');
 const {dailyQuest,syncHolderScores,publicRun,playerFilter,RUN_FIELDS}=require('./quest.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
+const {TRIAL_COURSES}=require('./engine.js');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
@@ -24,6 +25,7 @@ const STATIC_FILES=new Map([
   ['canyon-atmosphere.png','image/png'],['canyon-endless-layers.png','image/png'],
   ['terrain-biomes-v1.png','image/png'],['terrain-obstacles-v1.png','image/png'],
   ['catoshi-actions-extra-v1.png','image/png'],['sky-terrain-details-v1.png','image/png'],
+  ['cargo-parachute-v1.png','image/png'],
   ['catoshi-clean-actions.png','image/png'],['vault-scenery-atlas.png','image/png']
 ]);
 function openDatabase(filename) {
@@ -37,6 +39,8 @@ function openDatabase(filename) {
     CREATE INDEX IF NOT EXISTS runs_ranking ON runs(mode,round,score DESC);
     CREATE INDEX IF NOT EXISTS runs_session ON runs(session,started);
     CREATE INDEX IF NOT EXISTS runs_wallet_day ON runs(wallet,round,score DESC,submitted ASC,id ASC);
+    CREATE TABLE IF NOT EXISTS trial_runs(id TEXT PRIMARY KEY,session TEXT NOT NULL,name TEXT NOT NULL,wallet TEXT,level INTEGER NOT NULL,engine TEXT NOT NULL,started INTEGER NOT NULL,expires INTEGER NOT NULL,ticks INTEGER,time_ms INTEGER,boosts INTEGER,submitted INTEGER,inputs TEXT,disqualified TEXT);
+    CREATE INDEX IF NOT EXISTS trial_ranking ON trial_runs(level,engine,time_ms,submitted);
     CREATE TABLE IF NOT EXISTS round_rewards(round INTEGER PRIMARY KEY,rush_mint TEXT NOT NULL,rush_tokens TEXT NOT NULL,splits TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS reward_plans(round INTEGER PRIMARY KEY,vault TEXT NOT NULL,created INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS reward_payments(id TEXT PRIMARY KEY,round INTEGER NOT NULL,rank INTEGER NOT NULL,run_id TEXT NOT NULL,wallet TEXT NOT NULL,vault TEXT NOT NULL,mint TEXT NOT NULL,symbol TEXT NOT NULL,raw TEXT NOT NULL,decimals INTEGER NOT NULL,status TEXT NOT NULL,signature TEXT,created INTEGER NOT NULL,paid INTEGER,UNIQUE(round,rank,mint));
@@ -84,6 +88,7 @@ function createApp(config,options={}) {
     const t=now();if(t-lastCleanup<60000)return;lastCleanup=t;
     db.prepare('DELETE FROM challenges WHERE expires<?').run(t);
     db.prepare('DELETE FROM sessions WHERE expires<?').run(t);
+    db.prepare('DELETE FROM trial_runs WHERE submitted IS NULL AND expires<?').run(t-3600000);
     db.prepare("DELETE FROM runs WHERE submitted IS NULL AND expires<? AND (mode='practice' OR started<?)").run(t-3600000,t-90*86400000);
     // Keep rankings, but trim old practice recordings. Never trim payout evidence.
     db.prepare('UPDATE runs SET inputs=NULL WHERE started<? AND mode=\'practice\' AND inputs IS NOT NULL AND id NOT IN (SELECT run_id FROM payouts)').run(t-90*86400000);
@@ -148,6 +153,34 @@ function createApp(config,options={}) {
   function ranking(mode,round){
     return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
   }
+  function trialCourse(level){
+    const course=TRIAL_COURSES.find(value=>value.id===level);
+    if(!course)throw new HttpError(400,'Choose a Speed Trial course from 1 to 5.');
+    return {id:course.id,name:course.name,distance:course.distance/10};
+  }
+  function trialRanking(level){
+    return db.prepare(`SELECT id,name,wallet,level,time_ms,boosts,submitted FROM
+      (SELECT id,name,wallet,level,time_ms,boosts,submitted,
+        ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY time_ms,submitted,id) position
+       FROM trial_runs WHERE level=? AND engine=? AND submitted IS NOT NULL AND disqualified IS NULL)
+      WHERE position=1 ORDER BY time_ms,submitted,id LIMIT 50`).all(level,ENGINE_VERSION);
+  }
+  function publicTrial(record){
+    return {id:record.id,name:record.name,wallet:record.wallet?record.wallet.slice(0,4)+'…'+record.wallet.slice(-4):null,
+      level:record.level,timeMs:record.time_ms,boosts:record.boosts,submitted:record.submitted};
+  }
+  function trialBest(wallet,guestSession,level){
+    const owner=playerFilter(wallet,guestSession);
+    const best=db.prepare(`SELECT * FROM trial_runs WHERE ${owner.where} AND level=? AND engine=? AND submitted IS NOT NULL AND disqualified IS NULL ORDER BY time_ms,submitted,id LIMIT 1`).get(owner.value,level,ENGINE_VERSION);
+    if(!best)return null;
+    const rank=trialRanking(level).findIndex(row=>row.id===best.id)+1;
+    return {...publicTrial(best),rank:rank||null};
+  }
+  function trialResult(record,req,extra={}){
+    const best=trialBest(record.wallet,record.session,record.level);
+    return {run:publicTrial(record),best,rank:best?.id===record.id?best.rank:null,
+      course:trialCourse(record.level),engine:ENGINE_VERSION,url:siteOrigin(req)+'/?trial='+record.level,serverTime:now(),...extra};
+  }
   function siteOrigin(req){
     // Use the request Host, not an arbitrary X-Forwarded-Host supplied by a client.
     const host=req.headers.host;
@@ -182,6 +215,10 @@ function createApp(config,options={}) {
           const rewards=publicRewards(snapshot,config);
           json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
+        if(req.method==='GET'&&url.pathname==='/api/trials/leaderboard'){
+          const level=Number(url.searchParams.get('level')),course=trialCourse(level);
+          json(res,{course,engine:ENGINE_VERSION,entries:trialRanking(level).map((run,index)=>({...publicTrial(run),rank:index+1})),updatedAt:now()});return;
+        }
         if(req.method==='GET'&&url.pathname==='/api/leaderboard'){
           const mode='holder';
           const raw=url.searchParams.get('round');let round=currentRound(now());
@@ -214,6 +251,30 @@ function createApp(config,options={}) {
         }
         if(req.method!=='POST')throw new HttpError(404,'Not found.');
         const data=await body(req),user=session(req,res);
+        if(url.pathname==='/api/trials/start'){
+          rate(req,'starts',60,user.id);
+          const course=trialCourse(data.level),name=playerName(data.name),wallet=rewardAddress(data.wallet);
+          if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
+          const id=crypto.randomUUID(),started=now();
+          db.prepare('INSERT INTO trial_runs(id,session,name,wallet,level,engine,started,expires)VALUES(?,?,?,?,?,?,?,?)').run(id,user.id,name,wallet,course.id,ENGINE_VERSION,started,started+1200000);
+          json(res,{id,level:course.id,engine:ENGINE_VERSION,maxTicks:MAX_TICKS,wallet,best:trialBest(wallet,user.id,course.id)});return;
+        }
+        if(url.pathname==='/api/trials/finish'){
+          rate(req,'finishes',60,user.id);
+          const saved=db.prepare('SELECT * FROM trial_runs WHERE id=? AND session=?').get(String(data.id||''),user.id);
+          if(!saved)throw new HttpError(404,'Speed Trial not found.');
+          if(saved.submitted!==null){json(res,trialResult(saved,req,{duplicate:true}));return;}
+          if(saved.expires<now())throw new HttpError(410,'This Speed Trial expired. Start a new run.');
+          if(saved.engine!==ENGINE_VERSION)throw new HttpError(409,'The course changed; please start a new run.');
+          if(!Number.isInteger(data.ticks)||data.ticks>Math.floor((now()-saved.started+2000)/1000*120))throw new HttpError(400,'Run elapsed time is invalid.');
+          // Level and identity come from the ticket. Ignore claimed times,
+          // boosts, wallet and level in a finish request; replay is authoritative.
+          const checked=await checkReplay(0,data.ticks,data.inputs,saved.level);
+          if(saved.expires<now())throw new HttpError(410,'This Speed Trial expired. Start a new run.');
+          const changed=db.prepare('UPDATE trial_runs SET ticks=?,time_ms=?,boosts=?,submitted=?,inputs=? WHERE id=? AND submitted IS NULL').run(data.ticks,checked.timeMs,checked.boosts,now(),JSON.stringify(data.inputs),saved.id);
+          const record=db.prepare('SELECT * FROM trial_runs WHERE id=?').get(saved.id);
+          json(res,trialResult(record,req,{duplicate:changed.changes!==1}));return;
+        }
         if(['/api/entry','/api/balance'].includes(url.pathname)){
           const address=rewardAddress(data.wallet);
           json(res,{...holderStatus(address,undefined,user.id),eligible:true,minimumTokens:0,checkedAt:now()});return;

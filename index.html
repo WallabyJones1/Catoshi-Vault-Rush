@@ -9,14 +9,14 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0908'/%3E%3Ccircle cx='16' cy='16' r='11' fill='%23e8a13a'/%3E%3Cpath d='m17 6-7 12h6l-1 8 8-13h-6z' fill='%23f2efe9'/%3E%3C/svg%3E">
   <link rel="preload" href="chakra-petch-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="work-sans-400.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="styles.css?v=catoshi-home-style-2">
-  <script defer src="engine.js?v=web-11-terrain-weekly-1"></script>
-  <script defer src="renderer.js?v=web-11-asset-polish-1"></script>
+  <link rel="stylesheet" href="styles.css?v=single-player-polish-12">
+  <script defer src="engine.js?v=single-player-polish-12"></script>
+  <script defer src="renderer.js?v=single-player-polish-12"></script>
   <script defer src="audio-config.js?v=web-11-terrain-weekly-1"></script>
-  <script defer src="sound.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="sound.js?v=single-player-polish-12"></script>
   <script defer src="home.js?v=web-11-terrain-weekly-1"></script>
-  <script defer src="online.js?v=web-11-terrain-weekly-1"></script>
-  <script defer src="game.js?v=web-11-terrain-weekly-1"></script>
+  <script defer src="online.js?v=single-player-polish-12"></script>
+  <script defer src="game.js?v=single-player-polish-12"></script>
 </head>
 <body>
   <main id="app">
@@ -27,11 +27,13 @@
         <div class="brand-lockup"><h1 id="gate-title">VAULT<br><span>RUSH</span></h1><div id="home-mascot" class="home-mascot"><img id="home-catoshi" src="catoshi-home-v2.gif?v=guest-home-3" width="320" height="320" alt="Catoshi balancing, blinking and waving on her gold token" fetchpriority="high"><canvas id="home-catoshi-animation" width="320" height="320" aria-hidden="true" hidden></canvas></div></div>
         <p class="lede">Take the gold. Ride the hills.<br>Make the landing.</p>
         <section id="holder-entry" aria-label="Free entry">
+          <div class="mode-switch" role="group" aria-label="Game mode"><button id="mode-vault" type="button" aria-pressed="true">VAULT RUN</button><button id="mode-trial" type="button" aria-pressed="false">SPEED TRIALS</button></div>
+          <div id="trial-menu" hidden><p class="trial-intro">Five fixed tracks. Boosts, big jumps and gaps.</p><div id="trial-levels" class="trial-levels" role="group" aria-label="Choose a Speed Trial level"></div><p id="trial-target" class="practice-note"></p><button id="trial-leaderboard-button" class="ghost" type="button">TRACK LEADERBOARDS ↗</button></div>
           <p class="entry-meta">FREE PLAY <span>·</span> UNLIMITED RUNS</p>
           <p id="holder-best" class="practice-note"></p>
           <form id="wallet-form">
             <div class="player-field holder-name-field"><label for="holder-name">LEADERBOARD NAME <span>OPTIONAL</span></label><input id="holder-name" minlength="2" maxlength="20" autocomplete="nickname" placeholder="Your name"></div>
-            <div class="player-field"><label for="wallet">SOLANA REWARDS WALLET <span>OPTIONAL</span></label><input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="For token prizes · optional"></div>
+            <div id="wallet-field" class="player-field"><label for="wallet">SOLANA REWARDS WALLET <span>OPTIONAL</span></label><input id="wallet" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="For token prizes · optional"></div>
             <button id="verify-button" class="primary" type="submit">PLAY</button>
           </form>
           <p id="wallet-status" class="status" role="status" aria-live="polite"></p>
@@ -53,7 +55,8 @@
         <div class="game-shell">
           <canvas id="game" width="960" height="540" tabindex="0" aria-label="Tap or press space to jump; hold while airborne to backflip; release before landing."></canvas>
           <div class="hud">
-            <div class="hud-pickups"><div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div><span class="red-count" aria-label="Red RUSH this run"><i aria-hidden="true"></i><span id="run-red">0 / 5</span></span></div>
+            <div id="hud-pickups" class="hud-pickups"><div class="gold-count"><i aria-hidden="true"></i><span id="coins">0</span></div><span class="red-count" aria-label="Red RUSH this run"><i aria-hidden="true"></i><span id="run-red">0 / 5</span></span></div>
+            <div id="trial-clock" class="trial-clock" hidden><small>SPEED TRIAL</small><strong id="trial-time">00:00.00</strong><span id="trial-best-time"></span><progress id="trial-distance" max="1" value="0" aria-label="Course progress"></progress></div>
             <div class="hud-right"><strong id="distance">0m</strong><span id="score">000000</span><div id="lives" class="lives" role="img" aria-label="3 of 3 lives"><i id="life-1" aria-hidden="true"></i><i id="life-2" aria-hidden="true"></i><i id="life-3" aria-hidden="true"></i></div></div>
           </div>
           <div id="rush-burst" class="rush-burst" hidden><strong>RUSH · SHIELDED</strong><span id="rush-time">7.0s</span><progress id="rush-meter" max="7" value="7" aria-label="RUSH burst remaining"></progress></div>
@@ -83,18 +86,21 @@
         <p id="result-reason" class="result-reason">Crash landing</p>
         <div class="result-grid">
           <div><small>DISTANCE</small><strong id="final-distance">0m</strong></div>
-          <div><small>SCORE</small><strong id="final-score">0</strong></div>
-          <div><small>GOLD</small><strong id="final-coins">0</strong></div>
+          <div><small id="final-score-label">SCORE</small><strong id="final-score">0</strong></div>
+          <div><small id="final-coins-label">GOLD</small><strong id="final-coins">0</strong></div>
         </div>
         <p id="run-pickups" class="run-pickups"></p>
         <p id="result-quest" class="practice-note" role="status"></p>
         <button id="again" class="primary" type="button">RIDE AGAIN</button>
+        <button id="next-trial" class="ghost" type="button" hidden>NEXT LEVEL →</button>
         <p id="personal-best" class="personal-best" role="status"></p>
         <button id="change-wallet" class="ghost" type="button">BACK TO MENU</button>
         <p id="result-copy" class="practice-note">Your best checked run counts on the weekly leaderboard.</p>
         <p id="submission-status" class="status" role="status" aria-live="polite"></p>
-        <div class="share-actions"><a id="share-x" class="share-link" href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST SCORE TO X ↗</a><button id="copy-score" class="ghost" type="button">COPY</button></div>
+        <button id="retry-trial" class="ghost" type="button" hidden>RETRY POSTING TIME</button>
+        <div id="share-actions" class="share-actions"><a id="share-x" class="share-link" href="https://twitter.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST SCORE TO X ↗</a><button id="copy-score" class="ghost" type="button">COPY</button></div>
         <button id="result-leaderboard" class="ghost" type="button">LIVE LEADERBOARD</button>
+        <button id="result-trial-leaderboard" class="ghost" type="button" hidden>TRACK LEADERBOARD</button>
         <p id="share-status" class="status" role="status"></p>
       </div>
     </section>
@@ -107,6 +113,16 @@
         <p id="leaderboard-explainer" class="practice-note">BEST RUN PER PLAYER</p>
         <table class="rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">SCORE</th><th scope="col">DISTANCE</th></tr></thead><tbody id="leaderboard-rows"></tbody></table>
         <p id="leaderboard-status" class="status" role="status">Loading rankings…</p>
+      </div>
+    </section>
+    <section id="trial-board-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="trial-board-title" hidden>
+      <div class="board-card">
+        <div class="board-heading"><div><p class="eyebrow">SPEED TRIALS</p><h2 id="trial-board-title">BEST TIMES</h2></div><button id="close-trial-board" class="ghost" type="button" aria-label="Close track leaderboard">×</button></div>
+        <div id="trial-board-tabs" class="trial-board-tabs" role="group" aria-label="Choose track leaderboard"></div>
+        <div class="board-toolbar"><p id="trial-board-course" class="practice-note"></p><button id="trial-board-refresh" class="ghost" type="button">REFRESH</button></div>
+        <p class="practice-note">FASTEST CHECKED FINISH PER PLAYER</p>
+        <table class="rankings trial-rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">TIME</th></tr></thead><tbody id="trial-board-rows"></tbody></table>
+        <p id="trial-board-status" class="status" role="status" aria-live="polite">Loading times…</p>
       </div>
     </section>
   </main>

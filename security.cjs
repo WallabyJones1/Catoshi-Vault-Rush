@@ -1,6 +1,6 @@
 'use strict';
 const crypto = require('node:crypto');
-const { Run, VERSION:ENGINE_VERSION } = require('./engine.js');
+const { Run, Trial, TRIAL_COURSES, VERSION:ENGINE_VERSION } = require('./engine.js');
 const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const MINT = 'HrZh7koZFedTSHng4bVmhULwejpmVdSKUYxaf2N5im1b';
 const MAX_TICKS = 120 * 600;
@@ -34,7 +34,8 @@ function verifyMessage(address,message,signature) {
   return crypto.verify(null,Buffer.from(message,'utf8'),key,bytes);
 }
 function hash(token){return crypto.createHash('sha256').update(token).digest('hex');}
-function replay(seed,ticks,inputs) {
+function replay(seed,ticks,inputs,trialLevel=null) {
+  if(trialLevel!==null&&!TRIAL_COURSES.some(course=>course.id===trialLevel))throw new HttpError(400,'Invalid Speed Trial course.');
   if(!Number.isInteger(ticks)||ticks<1||ticks>MAX_TICKS||!Array.isArray(inputs)||inputs.length>MAX_INPUTS)throw new HttpError(400,'Invalid run recording.');
   let previous=-1,held=false;
   for(const input of inputs){
@@ -42,7 +43,7 @@ function replay(seed,ticks,inputs) {
     if(Boolean(input[1])===held)throw new HttpError(400,'Repeated input state.');
     held=Boolean(input[1]);previous=input[0];
   }
-  const run=new Run(seed);let cursor=0;
+  const run=trialLevel===null?new Run(seed):new Trial(trialLevel);let cursor=0;
   for(let tick=0;tick<ticks;tick++){
     if(run.dead)throw new HttpError(400,'Recording continues after the run ended.');
     while(cursor<inputs.length&&inputs[cursor][0]===tick){inputs[cursor++][1]?run.press():run.release();}
@@ -50,6 +51,10 @@ function replay(seed,ticks,inputs) {
   }
   if(ticks===MAX_TICKS&&!run.dead)run.crash('TIME LIMIT');
   if(!run.dead)throw new HttpError(400,'Only completed runs can enter the leaderboard.');
+  if(trialLevel!==null){
+    if(!run.finished)throw new HttpError(400,'Reach the finish line to post a Speed Trial time.');
+    return {level:trialLevel,timeMs:Math.round(run.finishTime*1000),boosts:run.boostsCollected,distance:Math.floor(run.trial.distance/10)};
+  }
   return {score:Math.floor(run.score),distance:Math.floor(run.player.x/10),coins:run.coins,redTokens:run.redTokens,rushPickups:run.rushPickups,reason:run.reason};
 }
 const TOKEN_PROGRAMS=new Set(['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA','TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb']);

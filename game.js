@@ -17,6 +17,38 @@
   let raf = 0, last = 0, accumulator = 0, countdown = 0, resultDelay = 0, trickTime = 0;
   let startId = 0, walletRequest = 0, inputPointer = null, keyHeld = false;
   let ticket=null,ticks=0,recording=[];
+  let selectedMode='vault',selectedLevel=1;
+  const courses=VaultRush.TRIAL_COURSES||[];
+  function formatTime(value){
+    const hundredths=Math.floor(Math.max(0,value)*100);
+    return String(Math.floor(hundredths/6000)).padStart(2,'0')+':'+String(Math.floor(hundredths/100)%60).padStart(2,'0')+'.'+String(hundredths%100).padStart(2,'0');
+  }
+  function bestKey(level){return 'catoshi-speed-trial:'+VaultRush.VERSION+':'+level+':'+$('wallet').value.trim();}
+  function trialBest(level){
+    try{const value=Number(localStorage.getItem(bestKey(level)));return Number.isFinite(value)&&value>0?value:null;}catch{return null;}
+  }
+  function trialMenu(){
+    const list=$('trial-levels');list.textContent='';
+    for(const course of courses){
+      const button=document.createElement('button'),label=document.createElement('strong'),detail=document.createElement('small');
+      button.type='button';button.className='trial-level';button.setAttribute('aria-pressed',String(course.id===selectedLevel));
+      label.textContent=String(course.id).padStart(2,'0')+' · '+course.name;
+      const best=trialBest(course.id);
+      detail.textContent=Math.floor(course.distance/10)+'m · '+(best?'BEST '+formatTime(best):'NO TIME YET');
+      button.appendChild(label);button.appendChild(detail);
+      button.addEventListener('click',()=>{selectedLevel=course.id;trialMenu();});list.appendChild(button);
+    }
+    const course=courses.find(c=>c.id===selectedLevel);
+    if(course)$('trial-target').textContent='PUBLIC BEST TIMES · '+Math.floor(course.distance/10)+'m';
+  }
+  function selectMode(mode){
+    if(phase!=='menu')return;
+    selectedMode=mode;
+    const trial=mode==='trial';
+    $('mode-vault').setAttribute('aria-pressed',String(!trial));$('mode-trial').setAttribute('aria-pressed',String(trial));
+    $('trial-menu').hidden=!trial;$('holder-entry').classList.toggle('trials-selected',trial);
+    ui['verify-button'].textContent=trial?'START SPEED TRIAL':'PLAY';status('');trialMenu();
+  }
 
   function show(id) { screens.forEach(screen => screen.classList.toggle('active',screen.id === id)); }
   function status(message, kind) {
@@ -32,6 +64,7 @@
   }
   function backToMenu() {
     startId++; walletRequest++;
+    window.RushOnline?.cancelSubmission?.();
     cancelAnimationFrame(raf); releaseInput();
     phase = 'menu'; ui['pause-panel'].hidden = true;
     sound.setPlaying(false);
@@ -61,6 +94,8 @@
     if(phase==='loading')return;
     sound.unlock(); sound.setPlaying(false);
     const operation = ++startId;
+    window.RushOnline?.cancelSubmission?.();
+    $('retry-trial').hidden=true;
     walletRequest++;
     ui['verify-button'].disabled = true;
     cancelAnimationFrame(raf); releaseInput();
@@ -75,14 +110,22 @@
       // Load artwork before reserving a scored run ticket.
       const images=await artworkReady();
       if(operation!==startId)return;
-      const onlineTicket=await window.RushOnline.prepare();
+      const trial=selectedMode==='trial';
+      const onlineTicket=trial?await window.RushOnline.prepareTrial(selectedLevel):await window.RushOnline.prepare();
       if (operation !== startId) return;
-      if(!onlineTicket?.id||!Number.isInteger(onlineTicket.seed))throw new Error('Could not reserve your run. Please retry.');
+      if(!onlineTicket?.id||(trial?onlineTicket.level!==selectedLevel:!Number.isInteger(onlineTicket.seed)))throw new Error('Could not reserve your run. Please retry.');
       setRunTicket(onlineTicket);
-      wallet=onlineTicket.wallet||'';
-      ui['mode-label'].textContent='WEEKLY RUN';
+      if(trial)try{
+        if(onlineTicket.best)localStorage.setItem(bestKey(selectedLevel),String(onlineTicket.best.timeMs/1000));
+        else localStorage.removeItem(bestKey(selectedLevel));
+      }catch{}
+      wallet=onlineTicket?.wallet||'';
+      ui['mode-label'].textContent=trial?'TRIAL '+selectedLevel+' / 5':'WEEKLY RUN';
+      $('trial-clock').hidden=!trial;$('hud-pickups').hidden=trial;$('lives').hidden=trial;ui.score.hidden=trial;
+      const best=trialBest(selectedLevel);$('trial-best-time').textContent=trial&&best?'PB '+formatTime(best):'';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
-      run = new VaultRush.Run(onlineTicket.seed); renderer.reset(run); renderer.breakout(run); renderer.draw(run);
+      run = trial?new VaultRush.Trial(selectedLevel):new VaultRush.Run(onlineTicket.seed);
+      renderer.reset(run); renderer.breakout(run); renderer.draw(run);
       sound.setPlaying(true);
       phase = 'countdown'; countdown = VaultRushRenderer.INTRO_DURATION || 1.25; accumulator = 0; trickTime = 0;
       ui.countdown.textContent = 'READY';
@@ -110,7 +153,16 @@
     lives.classList.toggle('last-life',run.lives===1);
     for(let i=1;i<=run.maxLives;i++)$('life-'+i).classList.toggle('empty',i>run.lives);
     ui.speed.textContent = Math.round(run.player.speed * .1);
-    ui.warning.hidden = !(run.dog.active && run.dog.warning);
+    if(run.mode==='trial'){
+      $('trial-time').textContent=formatTime(run.finishTime??run.time);
+      $('trial-distance').value=Math.min(1,run.player.x/run.trial.distance);
+      ui.distance.textContent=Math.max(0,Math.ceil((run.trial.distance-run.player.x)/10))+'m TO GO';
+    }
+    const cargo=run.items.some(item=>item.type==='cargo'&&item.drop.at!==null&&!item.drop.landed&&item.x>run.player.x-50&&item.x-run.player.x<1000);
+    const sand=run.player.grounded&&run.sandAt(run.player.x)>.2;
+    ui.warning.hidden=!(run.dog.warning||cargo||sand);
+    ui.warning.textContent=run.dog.warning?'HOUND CLOSING · KEEP MOVING':cargo?'INCOMING CARGO ↓':'SOFT SAND · JUMP TO KEEP SPEED';
+    ui.warning.classList.toggle('sand-warning',!run.dog.warning&&!cargo&&sand);
   }
   function events() {
     for (const event of run.drainEvents()) {
@@ -118,7 +170,7 @@
       sound.effect(event);
       if (event.type === 'trick') {
         ui.trick.textContent = event.text;
-        if (event.points) {
+        if (event.points && run.mode!=='trial') {
           const points = document.createElement('small');
           points.textContent = '+' + event.points;
           ui.trick.appendChild(points);
@@ -137,12 +189,19 @@
         ui.trick.textContent='+1 LIFE';
         ui.trick.classList.add('visible');trickTime=1.3;
       }
+      if(event.type==='escape'){
+        ui.trick.textContent='HOUND EVADED · +150';ui.trick.classList.add('visible');trickTime=1.5;
+      }
+      if(event.type==='finish'){phase='crashed';resultDelay=.65;releaseInput();ui.countdown.textContent='FINISH';}
       if (event.type === 'crash') { phase = 'crashed'; resultDelay = .85; releaseInput(); }
     }
   }
   function finish() {
     phase = 'result'; releaseInput();
     sound.setPlaying(false);
+    $('final-score-label').textContent='SCORE';$('final-coins-label').textContent='GOLD';
+    $('next-trial').hidden=true;$('result-leaderboard').hidden=false;$('result-trial-leaderboard').hidden=true;$('retry-trial').hidden=true;$('share-actions').hidden=false;
+    if(run.mode==='trial'){finishTrial();return;}
     ui['final-distance'].textContent = Math.floor(run.player.x / 10) + 'm';
     ui['final-score'].textContent = Math.floor(run.score).toLocaleString();
     ui['final-coins'].textContent = run.coins;
@@ -164,6 +223,40 @@
       if(result){ui['final-score'].textContent=result.run.score.toLocaleString();ui['final-distance'].textContent=result.run.distance+'m';ui['final-coins'].textContent=result.run.coins;}
       window.RushOnline.share(finishedRun,result);
     });
+  }
+  function finishTrial(){
+    const course=run.trial,seconds=run.finishTime,complete=run.finished&&Number.isFinite(seconds);
+    ui['result-kicker'].textContent='SPEED TRIAL '+course.id+' / 5 · '+course.name;
+    ui['result-reason'].textContent=complete?'COURSE COMPLETE':run.reason;
+    ui['final-distance'].textContent=Math.floor(run.player.x/10)+'m';
+    $('final-score-label').textContent='TIME';ui['final-score'].textContent=complete?formatTime(seconds):'—';
+    $('final-coins-label').textContent='BOOSTS';ui['final-coins'].textContent=run.boostsCollected;
+    $('run-pickups').textContent='';$('personal-best').textContent='';
+    $('result-quest').textContent='';$('submission-status').textContent='';$('share-status').textContent='';
+    ui['result-copy'].textContent=complete?'Your fastest checked finish counts on this track’s public leaderboard.':'Jump before the red gap markers. Ride again to finish the course.';
+    $('result-leaderboard').hidden=true;$('next-trial').hidden=!complete||course.id===5;
+    $('result-trial-leaderboard').hidden=false;
+    $('share-actions').hidden=!complete;
+    if(complete)window.RushOnline.share(run,null);
+    trialMenu();show('result');
+    if(!complete)return;
+    const finishedRun=run,finishedTicket=ticket,finishedTicks=ticks,finishedInputs=recording.slice(),finishedStart=startId,key=bestKey(course.id);
+    async function postTime(){
+      $('retry-trial').hidden=true;$('submission-status').textContent='Checking your finish and saving your time…';
+      try{
+        const result=await window.RushOnline.submitTrial(finishedTicket,finishedTicks,finishedInputs);
+        if(finishedStart!==startId||phase!=='result')return;
+        ui['final-score'].textContent=formatTime(result.run.timeMs/1000);
+        $('submission-status').textContent='Replay checked · '+(result.rank?'#'+result.rank+' ON THIS TRACK':'TIME SAVED');
+        $('personal-best').textContent=result.best?'PERSONAL BEST · '+formatTime(result.best.timeMs/1000)+(result.best.rank?' · #'+result.best.rank:''):'';
+        if(result.best)try{localStorage.setItem(key,String(result.best.timeMs/1000));}catch{}
+        window.RushOnline.share(finishedRun,result);trialMenu();
+      }catch(error){
+        if(finishedStart!==startId||phase!=='result')return;
+        $('submission-status').textContent='Time not posted: '+error.message;$('retry-trial').hidden=false;
+      }
+    }
+    $('retry-trial').onclick=postTime;postTime();
   }
   function loop(now) {
     const dt = Math.max(0,Math.min(.08,(now - last) / 1000)); last = now;
@@ -231,6 +324,14 @@
   }
 
   // Prize entry is free; rewards are bound to the pasted public address.
+  $('mode-vault').addEventListener('click',()=>selectMode('vault'));
+  $('mode-trial').addEventListener('click',()=>selectMode('trial'));
+  $('next-trial').addEventListener('click',()=>{selectedLevel=Math.min(5,selectedLevel+1);begin();});
+  $('trial-leaderboard-button').addEventListener('click',()=>window.RushOnline.openTrialBoard(selectedLevel));
+  $('result-trial-leaderboard').addEventListener('click',()=>window.RushOnline.openTrialBoard(run?.trial?.id||selectedLevel));
+  trialMenu();
+  const linkedTrial=Number(new URLSearchParams(location.search||'').get('trial'));
+  if(courses.some(course=>course.id===linkedTrial)){selectedLevel=linkedTrial;selectMode('trial');}
   $('again').addEventListener('click',() => begin());
   $('change-wallet').addEventListener('click',backToMenu);
   $('pause-menu').addEventListener('click',backToMenu);
