@@ -11,19 +11,21 @@ const WALLET='11111111111111111111111111111111';
 
 function ride(level,active=true){
   const run=new Trial(level),inputs=[];let ticks=0,maxAir=0;
+  const [gapTiming,obstacleTiming]=[[.16,.34],[.16,.28],[.28,.24],[.28,.24],[.2,.34]][level-1];
   while(!run.dead&&ticks<MAX_TICKS){
     const p=run.player;
     if(active&&p.grounded){
-      const gap=run.gaps.find(g=>g.x>p.x&&g.x-p.x<p.speed*.16);
+      const gap=run.gaps.find(g=>g.x>p.x&&g.x-p.x<p.speed*gapTiming);
       const nearGap=run.gaps.some(g=>g.x>p.x&&g.x-p.x<700);
       const boost=active!=='safe'&&!nearGap&&run.items.find(i=>i.aerial&&!i.hit&&i.x>p.x&&i.x-p.x<p.speed*.45);
       const ramp=run.ramps.find(r=>r.end>p.x&&r.end-p.x<p.speed*.12);
-      if(gap||boost||ramp){inputs.push([ticks,1],[ticks,0]);run.press();run.release();}
+      const obstacle=run.items.find(i=>i.hazard&&!i.hit&&i.x>p.x&&i.x-p.x<p.speed*obstacleTiming+25);
+      if(gap||boost||ramp||obstacle){inputs.push([ticks,1],[ticks,0]);run.press();run.release();}
     }
     run.step(1/120);run.drainEvents();ticks++;
     maxAir=Math.max(maxAir,run.terrain(p.x)-p.y);
     assert(!run.dog.active,'no pursuing hound in trials');
-    assert.equal(run.lives,3,'only a missed gap ends a trial, no damage obstacles');
+    assert(run.lives>=0&&run.lives<=3,'trial collisions respect the three-life limit');
   }
   return {run,ticks,inputs,maxAir};
 }
@@ -39,8 +41,12 @@ test('five fixed courses have reachable gaps, boosts and large jumps; all comple
     const a=new Trial(course.id),b=new Trial(course.id),recording=completed.get(course.id);
     assert(course.distance>previousLength);previousLength=course.distance;
     assert(!('gold'in course)&&!('silver'in course)&&!('bronze'in course));
-    assert(a.gaps.length>0&&a.items.every(item=>item.type==='boost'));
+    assert(a.gaps.length>0&&a.items.some(item=>item.type==='boost')&&a.items.some(item=>item.hazard));
     assert.equal(a.rails.length,0);assert.equal(a.encounters.length,0);
+    for(const h of a.items.filter(i=>i.hazard)){
+      assert(Math.abs(a.derivative(h.x))<=.48&&a.derivative(h.x-500)<=.65,'obstacles leave steep landing zones clear');
+      assert(!a.gaps.some(g=>h.x>g.x-850&&h.x<g.end+550),'gap approaches stay clear');
+    }
     assert.deepEqual(a.items,b.items);assert.deepEqual(a.ramps,b.ramps);assert.deepEqual(a.gaps,b.gaps);
     assert(recording.run.finished,'finishable course '+course.id);
     assert(recording.run.finishTime>previousTime);previousTime=recording.run.finishTime;
@@ -55,7 +61,7 @@ test('five fixed courses have reachable gaps, boosts and large jumps; all comple
     assert.throws(()=>replay(0,1,[],course.id),/completed/);
   }
   for(const level of [1,2,3,4,5]){
-    const missed=ride(level,false);assert.equal(missed.run.reason,'MISSED THE GAP');
+    const missed=ride(level,false);assert(['MISSED THE GAP','OUT OF LIVES'].includes(missed.run.reason));
     assert.throws(()=>replay(0,missed.ticks,missed.inputs,level),/finish line/);
   }
   assert.throws(()=>new Trial(0),/1 to 5/);assert.throws(()=>new Trial('1'),/1 to 5/);
@@ -259,14 +265,14 @@ test('Speed Trial UI starts without a wallet, records jumps, posts a time, retri
   vm.runInNewContext(fs.readFileSync(path.join(__dirname,'game.js'),'utf8'),context);
   assert.equal(elements['mode-trial']['aria-pressed'],'true');assert.equal(elements['trial-levels'].children.length,5);
   assert(!elements['holder-name'].disabled&&!elements.wallet.disabled);
-  await elements['wallet-form'].dispatch('submit');assert.equal(run.mode,'trial');assert.equal(starts,1);
+  await elements['wallet-form'].dispatch('submit');assert.equal(run.mode,'trial');assert.equal(starts,1);assert(!elements.lives.hidden,'obstacle trials show remaining hearts');
   assert.match(elements['ghost-name'].textContent,/Ghost Cat/);
   const tick=()=>{now+=1000/120;const callback=frame;frame=null;callback?.(now);};
   for(let i=0;i<180;i++)tick();
   const before=run.time;await elements.pause.dispatch('click');for(let i=0;i<30;i++)tick();assert.equal(run.time,before);await elements.resume.dispatch('click');
   for(let i=0;i<3000&&!run.dead;i++){
     const p=run.player;
-    if(p.grounded&&run.gaps.some(g=>g.x>p.x&&g.x-p.x<p.speed*.16)){
+    if(p.grounded&&(run.gaps.some(g=>g.x>p.x&&g.x-p.x<p.speed*.16)||run.items.some(i=>i.hazard&&!i.hit&&i.x>p.x&&i.x-p.x<p.speed*.34+25))){
       await elements['jump-control'].dispatch('pointerdown',{pointerId:1,pointerType:'touch'});
       await elements['jump-control'].dispatch('pointerup',{pointerId:1,pointerType:'touch'});
     }

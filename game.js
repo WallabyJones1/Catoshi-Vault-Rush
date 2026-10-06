@@ -142,7 +142,7 @@
       }catch{}
       wallet=onlineTicket?.wallet||'';
       ui['mode-label'].textContent=trial?'TRIAL '+selectedLevel+' / 5':'WEEKLY RUN';
-      $('trial-clock').hidden=!trial;$('hud-pickups').hidden=trial;$('lives').hidden=trial;ui.score.hidden=trial;
+      $('trial-clock').hidden=!trial;$('hud-pickups').hidden=trial;$('lives').hidden=false;ui.score.hidden=trial;
       const best=trialBest(selectedLevel);$('trial-best-time').textContent=trial&&best?'PB '+formatTime(best):'';
       renderer = new VaultRushRenderer.Renderer(ctx,images);
       run = trial?new VaultRush.Trial(selectedLevel):new VaultRush.Run(onlineTicket.seed);

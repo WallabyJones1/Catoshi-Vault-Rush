@@ -323,7 +323,7 @@
       // A warning/shadow is present from the trigger, including while the
       // package is above the viewport. It is never a second collider.
       if(!drop.landed){
-        ctx.save();ctx.translate(item.x,ground);ctx.rotate(run.slope(item.x));
+        ctx.save();ctx.translate(drop.landX??item.x,run.terrain(drop.landX??item.x));ctx.rotate(run.slope(drop.landX??item.x));
         ctx.strokeStyle='rgba(224,59,59,.60)';ctx.lineWidth=2;
         ctx.beginPath();ctx.moveTo(-29,-3);ctx.lineTo(-10,-3);ctx.moveTo(10,-3);ctx.lineTo(29,-3);ctx.stroke();
         ctx.fillStyle='rgba(10,9,8,.35)';ctx.beginPath();ctx.ellipse(0,1,clamp(34-(ground-item.y)*.015,13,34),4,0,0,Math.PI*2);ctx.fill();
@@ -334,7 +334,7 @@
       }
       if(age<drop.warning)return;
       const collapse=drop.landed?clamp((run.time-drop.landedAt)/.65,0,1):0;
-      const sway=Math.sin(age*2.5+item.x*.01)*10;
+      const sway=(drop.landed?0:18)+Math.sin(age*2.5+item.x*.01)*6;
       const anchorY=item.y-height-62*(1-collapse),canopyWidth=96*(1-collapse*.10);
       if(collapse<1){
         ctx.save();ctx.globalAlpha=1-collapse*.5;

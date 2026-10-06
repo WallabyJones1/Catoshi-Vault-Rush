@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-13-ghost-challenge';
+  const ENGINE='flow-web-15-trial-gates';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){

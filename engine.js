@@ -348,8 +348,9 @@
       return null;
     }
     addCargo(x,index,aerial=false) {
-      const item={type:'cargo',x,y:this.terrain(x)-980,width:48,height:43,hazard:true,heavy:true,hit:false,
-        drop:{at:null,warning:.30,duration:.9+this.terrainRandom(index,749129)*.45,landed:false,aerial,spawnY:null}};
+      const item={type:'cargo',x,y:this.terrain(x)-1100,width:48,height:43,hazard:true,heavy:true,hit:false,
+        drop:{at:null,warning:.32,duration:1.05+this.terrainRandom(index,749129)*.2,
+          drift:190+this.terrainRandom(index,749131)*100,landed:false,aerial,spawnY:null}};
       this.items.push(item);this.lastCargo=x;
       return item;
     }
@@ -359,19 +360,27 @@
         if(item.type!=='cargo'||item.hit)continue;
         const drop=item.drop;
         if(drop.at===null){
-          // World-space trigger; camera size and rendering never affect replay.
-          if(item.x-p.x>650||p.x>item.x+100)continue;
-          // The package begins well above Catoshi, inside the visible route
-          // ahead. World coordinates keep mobile and server collisions identical.
-          drop.at=this.time;drop.spawnY=Math.min(p.y-1600,this.terrain(item.x)-1500);
-          item.y=drop.spawnY;this.event('cargo-warning',{x:item.x});
+          if(item.x-p.x>Math.max(1250,p.vx*1.8)||p.x>item.x+100)continue;
+          // Lock a trajectory ONCE. Never home in on the rider after warning.
+          // Ground drops meet the approach; aerial drops cross earlier overhead.
+          const crossing=drop.duration*(drop.aerial?.85:.98);
+          const travel=clamp(p.vx,180,SPEED_LIMITS.air)*(drop.warning+crossing);
+          drop.startX=p.x+Math.max(350,travel)+drop.drift*crossing;
+          drop.landX=drop.startX-drop.drift*drop.duration;
+          drop.groundY=this.terrain(drop.landX);
+          drop.spawnY=Math.min(p.y-1100,drop.groundY-1000);
+          drop.at=this.time;item.x=drop.startX;item.y=drop.spawnY;
+          this.event('cargo-warning',{x:item.x});
         }
         if(drop.landed)continue;
         const progress=clamp((this.time-drop.at-drop.warning)/drop.duration,0,1);
-        const ground=this.terrain(item.x);
-        const origin=drop.spawnY??ground-1500;
-        item.y=progress===1?ground:origin+(ground-origin)*(1-(1-progress)**1.2);
-        if(progress===1){drop.landed=true;drop.landedAt=this.time;this.event('cargo-land',{x:item.x,y:item.y});}
+        item.x=drop.startX-drop.drift*drop.duration*progress;
+        item.y=drop.spawnY+(drop.groundY-drop.spawnY)*progress;
+        // Contact the actual hillside, including slopes along the drifting path.
+        if(progress===1||item.y>=this.terrain(item.x)){
+          item.y=this.terrain(item.x);drop.landed=true;drop.landedAt=this.time;
+          this.event('cargo-land',{x:item.x,y:item.y});
+        }
       }
     }
     generate(ahead) {
@@ -638,7 +647,7 @@
       if (p.invulnerable > 0 || p.rush > 0) return;
       const heavy=Boolean(item.heavy||item.hazard),before=p.speed;
       this.mistake();
-      p.speed=Math.min(before,clamp(before*(p.mistakes>1?.30:heavy?.50:.62),p.mistakes>1?20:115,heavy?460:540));
+      p.speed=Math.min(before,clamp(before*(p.mistakes>1?.18:heavy?.32:.48),p.mistakes>1?0:65,heavy?300:420));
       p.vx*=p.speed/Math.max(1,before);
       if(!p.grounded)p.vy*=.8;
       p.boost=0;
@@ -707,10 +716,10 @@
       if (p.grounded) {
         let angle = p.rail ? this.railSlope(p.rail, p.x) : p.ramp ? this.rampSlope(p.ramp, p.x) : this.slope(p.x);
         const sand=p.rail||p.rush>0||p.recovery>0?0:this.sandAt(p.x);
-        const acceleration = 620 * Math.sin(angle) * 0.45 + 20 - p.speed * 0.075 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?48:0)
+        const acceleration = 620 * Math.sin(angle) * 0.45 + 20 - p.speed * 0.075 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?(this.mode==='trial'?48:10):0)
           -sand*(120+p.speed*.09);
         const maximum=p.rush>0?SPEED_LIMITS.rush:Math.max(SPEED_LIMITS.ground,p.speed-360*dt);
-        const minimum=this.mode==='trial'?65:p.x<2400?200:p.mistakes>1?0:angle>=-.08?60:110;
+        const minimum=this.mode==='trial'?65:p.x<2400?200:p.mistakes>0?0:angle>=-.08?45:65;
         p.speed = clamp(p.speed + acceleration * dt, p.rush>0?SPEED_LIMITS.rushFloor:minimum, maximum);
         p.vx = p.speed * Math.cos(angle);
         p.vy = p.speed * Math.sin(angle);
@@ -822,21 +831,21 @@
       this.score += (p.x - previousX) * 0.055;
       const pressure=this.sandAt(p.x)>.15;
       const threat=clamp((p.x-2400)/22000,0,1);
-      const lowSpeed=pressure?280:p.x<2400?160:210+threat*35;
-      this.slowTime = p.rush>0||p.recovery>0?0:p.speed < lowSpeed ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
+      const lowSpeed=p.x<2400?160:pressure?360:300+threat*70;
+      this.slowTime = p.rush>0?0:p.speed < lowSpeed ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
       const wasActive = this.dog.active;
-      if (this.mode!=='trial'&&!wasActive && p.rush<=0&&this.slowTime > .9) {
+      if (this.mode!=='trial'&&!wasActive && p.rush<=0&&this.slowTime > .7) {
         this.dog.active = true;
-        this.dog.distance = 240-threat*35;
+        this.dog.distance = 215-threat*35;
         this.event('warning', { text: 'LOW SPEED · THE HOUND IS NEAR' });
       }
       if (this.dog.active) {
-        this.dog.distance += (p.recovery>0||p.recoveryGap?0:clamp((p.speed-(pressure?305:260+threat*30))*.9,-125,155)) * dt;
-        if(p.recovery>0||p.recoveryGap)this.dog.distance=Math.max(90,this.dog.distance);
-        this.dog.warning = p.recovery<=0&&!p.recoveryGap&&(p.speed < (pressure?305:250)||this.dog.distance<175);
+        this.dog.distance += (p.recoveryGap?0:clamp((p.speed-(pressure?390:340+threat*70))*.95,-160,120)) * dt;
+        if(p.recovery>0||p.recoveryGap)this.dog.distance=Math.max(55,this.dog.distance);
+        this.dog.warning = p.recovery<=0&&!p.recoveryGap&&(p.speed < (pressure?390:340+threat*70)||this.dog.distance<175);
         const stretch=this.encounters.find(e=>p.x>e.flatStart&&p.x<e.end);
         if(stretch)stretch.chased=true;
-        if (this.dog.distance > 520) {
+        if (this.dog.distance > 650) {
           this.dog.active = false; this.dog.warning = false; this.slowTime = 0;
           const escape=stretch||this.encounters.find(e=>e.chased&&!e.cleared&&p.x>=e.end&&p.x<e.end+1600);
           if(escape?.chased&&!escape.cleared){escape.cleared=true;this.score+=150;this.event('escape',{x:p.x,y:p.y,points:150});}
@@ -844,8 +853,8 @@
         const reachable=p.grounded||!this.gapAt(p.x)&&this.terrain(p.x)-p.y<48;
         if(this.dog.distance<24){if(reachable)this.crash('THE HOUND CAUGHT UP');else this.dog.distance=24;}
       }
-      p.stall=this.mode!=='trial'&&p.rush<=0&&p.recovery<=0&&p.grounded&&p.speed<65&&p.mistakes>0?p.stall+dt:Math.max(0,p.stall-dt*2);
-      if(p.stall>2.4)this.crash('LOST MOMENTUM');
+      p.stall=this.mode!=='trial'&&p.rush<=0&&p.recovery<=0&&p.grounded&&p.speed<85&&p.mistakes>0?p.stall+dt:Math.max(0,p.stall-dt*2);
+      if(p.stall>1.65)this.crash('LOST MOMENTUM');
       this.generate(2600);
       this.items = this.items.filter(i => !i.hit && i.x > p.x - 300);
       this.rails = this.rails.filter(r => r.end > p.x - 600);
@@ -864,7 +873,7 @@
     {id:3,name:'FOREST FLIGHT',theme:1,gaps:[[6900,430],[13750,320],[18400,460]],legs:[[800,150],[1400,-350],[2200,1700],[1400,-700],[1800,70],[2500,1800],[1300,-650],[1900,1400],[1700,260],[1200,-520],[1900,1600],[1500,90]]},
     {id:4,name:'RIDGE RUNNER',theme:2,gaps:[[7950,480],[19800,380],[24900,540]],legs:[[1000,180],[2000,-720],[2200,2200],[1700,-900],[2600,180],[2600,2300],[2000,-1000],[2700,2400],[1800,-450],[2400,1850],[1500,-850],[2000,2250],[1700,100]]},
     {id:5,name:'MIDNIGHT SUMMIT',theme:3,gaps:[[8120,530],[18600,580],[33000,610]],legs:[[1100,160],[1900,-900],[2100,2300],[1800,-1100],[3200,120],[2800,3000],[1900,-900],[2700,2000],[2600,60],[2500,-1400],[2800,3300],[2600,800],[1700,-1000],[2600,3000],[2300,100]]}
-  ].map(course=>Object.freeze({...course,distance:course.legs.reduce((sum,[length])=>sum+length,0),gaps:Object.freeze(course.gaps.map(gap=>Object.freeze(gap))),legs:Object.freeze(course.legs.map(leg=>Object.freeze(leg)))}));
+  ].map(course=>Object.freeze({...course,distance:course.legs.reduce((sum,[length])=>sum+length,0),gaps:Object.freeze(course.gaps.map(gap=>Object.freeze(gap))),legs:Object.freeze(course.legs.map(([length,drop],index)=>Object.freeze([length,index===0?drop:Math.round(drop*(drop>100?1.12:drop<0?1.1:1))])))}));
   Object.freeze(TRIAL_COURSES);
   class Trial extends Run {
     constructor(level=1){
@@ -892,6 +901,21 @@
         const pad=x-440;
         this.items.push({type:'boost',x:pad,y:this.terrain(pad)-3,hit:false});
       }
+      // Fixed, spaced jump gates. Keep clear of boost pads, ramp seams and
+      // gap approaches so every obstacle has a readable takeoff and landing.
+      const obstacleTypes=['rock','log','crate','barrier','stack'];
+      let lastObstacle=-Infinity;
+      for(let x=950;x<course.distance-600;x+=120){
+        if(x-lastObstacle<Math.max(950,1450-level*70))continue;
+        if(Math.abs(this.derivative(x))>.48||this.derivative(x-500)>.65)continue;
+        if(this.gaps.some(g=>x>g.x-850&&x<g.end+550))continue;
+        if(this.ramps.some(r=>x>r.x-500&&x<r.recovery+500))continue;
+        if(this.items.some(i=>Math.abs(i.x-x)<320))continue;
+        const type=obstacleTypes[(Math.round(x/120)+level)%Math.min(5,level+1)];
+        this.items.push({type,x,y:this.terrain(x),width:48+level*5,height:36+level*4,
+          hazard:true,heavy:true,hit:false});
+        lastObstacle=x;
+      }
       this.items=this.items.filter(item=>!this.gaps.some(gap=>item.x>gap.x&&item.x<gap.end));
       for(let x=650;x<course.distance;x+=800)if(!this.gapAt(x))this.scenery.push({x,type:'lantern',scale:.8});
     }
@@ -916,5 +940,5 @@
       }
     }
   }
-  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-13-ghost-challenge' };
+  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-15-trial-gates' };
 });

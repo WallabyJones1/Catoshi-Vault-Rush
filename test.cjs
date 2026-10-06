@@ -27,7 +27,7 @@ test('varied terrain, safe introductions, immediate jumping, backflip bonus and 
   const flip=new Run(4321);Object.assign(flip.player,{grounded:false,airborne:2,spin:TAU+.15,vx:420,vy:0,angle:flip.slope(0)});
   flip.release();flip.land(flip.terrain(0),flip.slope(0));assert(flip.score>=1000);assert(flip.drainEvents().some(e=>e.text==='BACKFLIP'));
   const chase=new Run(5);chase.terrain=()=>200;chase.derivative=()=>0;chase.slope=()=>0;chase.player.x=3000;chase.player.y=200;chase.player.speed=90;chase.player.boost=0;chase.items=[];chase.nextFeature=chase.nextScenery=Infinity;
-  advance(chase,130);assert(chase.dog.active);chase.player.speed=500;advance(chase,270);assert(!chase.dead);assert(!chase.dog.active);
+  advance(chase,130);assert(chase.dog.active);chase.player.speed=900;advance(chase,650);assert(!chase.dead);assert(!chase.dog.active);
 });
 test('terrain has large smooth hills, distinct regions and lookup-order-independent seeds',()=>{
   const modes=new Set(),openings=new Set();let biggest=0;
@@ -516,7 +516,7 @@ test('landing on a tall obstacle cannot bypass the nonfatal collision response o
   const run=recoveryRun();run.items=[{type:kind,x:104,y:200,width:74,height:70,heavy:true,hazard:true}];
   run.dog={active:true,distance:24.1,warning:true};run.step(1/120);
   assert(!run.dead,kind+' collision and landing must survive');advance(run,1);assert(run.player.grounded);
-  assert(run.player.recovery>1);assert(run.dog.distance>=90);assert(!run.dog.warning);
+  assert(run.player.recovery>1);assert(run.dog.distance>=55);assert(!run.dog.warning);
   assert.equal(run.drainEvents().filter(event=>event.type==='stumble').length,1);
   advance(run,100);assert(!run.dead,'brief recovery prevents an instant second punishment');
   run.press();run.release();advance(run,100);assert(!run.dead,'a prompt jump gives time to escape');assert(run.player.recovery===0);
