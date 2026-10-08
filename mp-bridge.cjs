@@ -36,7 +36,7 @@ function forward(req,res){
   return true;
 }
 function proxyUpgrade(req,socket,head){
-  if(!isMpRoute(req.url))return socket.destroy();
+  if(!isMpRoute(req.url))return; // Do not interfere with solo or other WebSocket routes
   socket.setTimeout(12000,()=>socket.destroy());
   const upstream=net.connect({host:'127.0.0.1',port});
   upstream.once('connect',()=>{

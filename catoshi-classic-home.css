@@ -280,3 +280,12 @@
 .multiplayer-embedded-bar button{min-height:36px;border:1px solid #9e603a;background:transparent;color:#ffad73;border-radius:8px;padding:6px 12px;cursor:pointer}
 #multiplayer-iframe{width:100%;height:100%;min-height:0;flex:1;border:0;background:#0a0908}
 .multiplayer-embed-status{position:absolute;top:53px;right:12px;font-size:11px;pointer-events:none;color:#f8bd91}
+/* V9: Multiplayer panel remains independent of legacy global styles. */
+#gate .mode-switch:has(> #mode-multiplayer){grid-template-columns:repeat(3,minmax(0,1fr))}
+#gate .mode-switch:has(> #mode-multiplayer)>button{min-width:0;padding-inline:3px;font-size:clamp(10px,2.5vw,12px)}
+.multiplayer-embedded{position:fixed;inset:0;z-index:9999;background:#0a0807;color:#f4e6d9;display:flex;flex-direction:column}
+.multiplayer-embedded[hidden]{display:none!important}
+.multiplayer-embedded-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:52px;padding:9px max(12px,env(safe-area-inset-right));border-bottom:1px solid #493022;background:#17100c;font-weight:700;font-size:13px;letter-spacing:.04em}
+.multiplayer-embedded-bar button{min-height:36px;border:1px solid #9e603a;background:transparent;color:#ffad73;border-radius:8px;padding:6px 12px;cursor:pointer}
+#multiplayer-iframe{display:block;width:100%;height:100%;min-height:0;flex:1;border:0;background:#0a0908}
+.multiplayer-embed-status{position:absolute;top:53px;right:12px;font-size:11px;pointer-events:none;color:#f8bd91}
