@@ -18,7 +18,7 @@
 
   async function begin(multiplayerTicket){
     if(phase==='loading'||!multiplayerTicket?.matchId)return;
-    sound.unlock();sound.setPlaying(false);const operation=++startId;cancelAnimationFrame(raf);releaseInput();phase='loading';ticket=multiplayerTicket;lastRaceMode=ticket.mode||'public';$('mode-label').textContent='MULTIPLAYER · '+ticket.playerCount+' RACERS';$('countdown').textContent='LOADING';$('race-standings').hidden=false;show('game-screen');resizeGame();drawLoading();
+    sound.unlock();sound.setPlaying(false);const operation=++startId;cancelAnimationFrame(raf);releaseInput();phase='loading';ticket=multiplayerTicket;lastRaceMode=ticket.mode||'public';$('mode-label').textContent=(ticket.trackName||'MULTIPLAYER')+' · '+ticket.playerCount+' RACERS';$('countdown').textContent='LOADING';$('race-standings').hidden=false;show('game-screen');resizeGame();drawLoading();
     try{
       if(!ctx||typeof VaultRace==='undefined'||typeof VaultRushRenderer==='undefined')throw Error('Multiplayer game unavailable.');
       const images=await artworkReady();if(operation!==startId)return;
@@ -27,11 +27,12 @@
     }catch(error){if(operation!==startId)return;stopRace({forfeit:true});setStatus(error.message||'Could not load the race. Please retry.','error');}
   }
 
-  function updateHud(){if(!run)return;$('coins').textContent=run.coins;$('ammo-count').textContent=Math.floor((run.coins||0)/(window.VaultRace?.COINS_PER_SHOT||5));$('rush-burst').hidden=run.player.boost<=0;$('boost-count').textContent=run.boostCharges?run.boostCharges+' READY':'COLLECT';$('boost-control').disabled=!run.boostCharges;$('rush-time').textContent=run.player.boost.toFixed(1)+'s';$('rush-meter').value=run.player.boost;$('distance').textContent=Math.floor(run.player.x/10)+'m';$('score').textContent=String(Math.floor(run.score)).padStart(6,'0');$('speed').textContent=Math.round(run.player.speed*.1);}
+  function updateHud(){if(!run)return;const required=window.VaultRace?.COINS_PER_SHOT||5;const cd=Math.max(0,run.shotCooldown||0);$('coins').textContent=run.coins;$('ammo-count').textContent=cd>.05?cd.toFixed(1)+'s':run.coins>=required?'READY':run.coins+'/'+required;$('fire-control').disabled=phase!=='running'||cd>.05||run.coins<required;$('fire-status').textContent=cd>.05?cd.toFixed(1)+'s RELOAD':run.coins>=required?'READY · '+required+' COINS':run.coins+'/'+required+' COINS';$('rush-burst').hidden=run.player.boost<=0;$('boost-count').textContent=run.boostCharges+' / '+(window.VaultRace?.MAX_BOOST_CHARGES||3);$('boost-control').disabled=phase!=='running'||!run.boostCharges;$('rush-time').textContent=run.player.boost.toFixed(1)+'s';$('rush-meter').value=run.player.boost;$('distance').textContent=Math.floor(run.player.x/10)+'m';$('score').textContent=String(Math.floor(run.score)).padStart(6,'0');$('speed').textContent=Math.round(run.player.speed*.1);}
   function handleLocalEvents(){
     if(!run)return;for(const event of run.drainEvents()){
       renderer.handle(event);sound.effect(event);
       if(event.type==='trick'){ $('trick').textContent=event.text;if(event.points){const pts=document.createElement('small');pts.textContent='+'+event.points;$('trick').appendChild(pts);}$('trick').classList.add('visible');trickTime=1.5; }
+      else if(event.type==='shot'){ $('trick').textContent='COIN SHOT · 3.5s RELOAD';$('trick').classList.add('visible');trickTime=.65; }
       else if(event.type==='rush'){ $('trick').textContent='BOOST ACTIVE';$('trick').classList.add('visible');trickTime=1; }
       else if(event.type==='respawn'){ $('trick').textContent='GAP RESET · KEEP RACING';$('trick').classList.add('visible');trickTime=1.2; }
     }
@@ -51,7 +52,7 @@
 
   function multiplayerSnapshot(snapshot){
     if(!run||!ticket||snapshot.matchId!==ticket.matchId)return;const me=snapshot.players.find(p=>p.seat===ticket.seat);
-    if(me){const p=run.player,dx=me.x-p.x,dy=me.y-p.y;if(Math.abs(dx)>160||Math.abs(dy)>180)run.applySnapshot(me);else{run.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle'])if(Number.isFinite(me[k]))p[k]+=(me[k]-p[k])*.42;for(const k of ['grounded','held','heldTime','airborne','invulnerable','boost','stagger','respawnFreeze'])if(me[k]!==undefined)p[k]=me[k];for(const k of ['coins','coinsCollected','boostCharges','shots','hits','respawns','finished','score'])if(me[k]!==undefined)run[k]=me[k];}}
+    if(me){const p=run.player,dx=me.x-p.x,dy=me.y-p.y;if(Math.abs(dx)>160||Math.abs(dy)>180)run.applySnapshot(me);else{run.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle'])if(Number.isFinite(me[k]))p[k]+=(me[k]-p[k])*.42;for(const k of ['grounded','held','heldTime','airborne','invulnerable','boost','stagger','respawnFreeze'])if(me[k]!==undefined)p[k]=me[k];for(const k of ['coins','coinsCollected','boostCharges','shotCooldown','shots','hits','respawns','finished','score'])if(me[k]!==undefined)run[k]=me[k];}}
     run.syncBoostMask?.(snapshot.boostMask||0);renderer?.setRaceEntities?.(snapshot.players.filter(p=>p.seat!==ticket.seat));renderer?.setProjectiles?.(snapshot.projectiles||[]);updateHud();
   }
   function multiplayerEvent(event){

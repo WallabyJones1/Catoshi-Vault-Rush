@@ -8,35 +8,69 @@
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const smooth=t=>t*t*(3-2*t);
 
-  // Dedicated multiplayer downhill courses. Distances are world units; UI shows x/10 metres.
+  // V7: ten distinct, finishable routes. Distances are world units (display x/10 metres).
+  // Hills alternate between crest/valley; ramps sit ahead of gap sequences to reward
+  // well-timed jumps without requiring pixel-perfect timing. Missed gaps always respawn.
+  // Every course has several *contested* boost tokens; each racer can carry max 3.
+  // Config: id, name, biome, finishX, grade, hills, ramps, gaps, boost locations,
+  // coin caches, large/small wave amplitude and track character.
   const defs=[
-    ['summit-smash','SUMMIT SMASH',0,36000,.245,[[.13,900,-130],[.29,1200,145],[.52,1450,-180],[.73,1100,150]],[[.20,.014,95,190],[.47,.016,110,215],[.78,.014,90,185]],[[.49,.010],[.82,.012]],[.10,.37,.66,.88]],
-    ['pine-needle-pass','PINE NEEDLE PASS',1,38500,.255,[[.16,1100,-160],[.34,900,135],[.56,1500,-155],[.74,1200,175]],[[.18,.013,80,180],[.41,.014,100,205],[.69,.016,105,220]],[[.43,.009],[.71,.010]],[.12,.31,.59,.84]],
-    ['canyon-drop','CANYON DROP',2,42000,.275,[[.12,1400,130],[.28,1300,-190],[.48,1700,190],[.68,1550,-160],[.84,1000,110]],[[.23,.016,120,230],[.46,.018,130,250],[.76,.016,105,220]],[[.48,.013],[.79,.014],[.90,.009]],[.09,.35,.62,.86]],
-    ['frozen-rush','FROZEN RUSH',3,40000,.265,[[.15,1600,-120],[.31,1400,160],[.55,1200,-145],[.72,1550,140]],[[.20,.015,90,190],[.50,.016,105,215],[.74,.015,95,200]],[[.52,.012],[.77,.011]],[.08,.27,.61,.90]],
-    ['temple-tumble','TEMPLE TUMBLE',1,43000,.258,[[.10,1000,110],[.25,1500,-175],[.44,1000,150],[.61,1650,-190],[.82,1300,150]],[[.17,.014,85,185],[.38,.016,110,220],[.59,.016,115,225],[.83,.013,85,185]],[[.40,.010],[.62,.012],[.86,.010]],[.11,.33,.54,.75,.92]],
-    ['stormspill-ridge','STORMSPILL RIDGE',3,44500,.285,[[.13,1400,-145],[.32,1100,150],[.50,1550,-170],[.67,1150,140],[.83,1450,-155]],[[.21,.017,120,235],[.48,.016,105,220],[.70,.018,125,240]],[[.50,.010],[.72,.010],[.88,.013]],[.15,.39,.64,.85]],
-    ['magma-mile','MAGMA MILE',2,39000,.292,[[.14,1200,145],[.30,1000,-130],[.49,1600,175],[.70,1400,-165]],[[.19,.015,100,210],[.44,.017,120,235],[.68,.016,105,220]],[[.45,.013],[.72,.012]],[.07,.29,.57,.82]],
-    ['skybridge-sprint','SKYBRIDGE SPRINT',3,34500,.275,[[.16,900,-105],[.33,900,120],[.50,1000,-125],[.68,900,120],[.84,850,-105]],[[.14,.014,85,185],[.31,.014,90,190],[.48,.014,90,190],[.65,.014,90,190],[.82,.014,90,190]],[[.33,.009],[.50,.009],[.67,.009],[.84,.009]],[.12,.42,.73,.91]],
-    ['goldrush-gulch','GOLDRUSH GULCH',2,45500,.268,[[.11,1500,-150],[.27,1200,140],[.46,1700,-180],[.65,1400,165],[.83,1300,-140]],[[.16,.015,95,200],[.40,.017,115,230],[.62,.016,105,220],[.85,.014,90,195]],[[.42,.012],[.65,.011],[.87,.012]],[.09,.24,.52,.76,.93]],
-    ['vaultfall-finals','VAULTFALL FINALS',0,47000,.282,[[.10,1600,-150],[.24,1300,150],[.40,1800,-185],[.56,1200,135],[.70,1650,-170],[.84,1200,120]],[[.15,.016,105,215],[.35,.017,120,235],[.54,.015,100,210],[.71,.018,130,245],[.86,.015,100,210]],[[.36,.012],[.57,.010],[.73,.013],[.88,.011]],[.08,.28,.49,.68,.83,.94]]
+    {id:'summit-smash',name:'SUMMIT SMASH',biome:0,finishX:36500,grade:.252,
+     hills:[[.12,1250,-170],[.25,850,135],[.43,1100,-205],[.65,950,175],[.82,1000,-135]],
+     ramps:[[.20,115,90,190],[.455,125,115,215],[.70,110,105,200]],gaps:[[.23,.009],[.49,.010],[.75,.009]],
+     boosts:[.085,.27,.38,.57,.69,.88],coins:[.065,.17,.32,.44,.60,.81,.92],wave:[36,14],style:'ALPINE ROLLERS · THREE LEAPS'},
+    {id:'pine-needle-pass',name:'PINE NEEDLE PASS',biome:1,finishX:38500,grade:.255,
+     hills:[[.10,1000,100],[.20,980,-125],[.33,820,175],[.44,1050,-120],[.60,820,145],[.77,1000,-160]],
+     ramps:[[.165,90,82,185],[.39,105,98,195],[.70,105,98,210],[.84,100,90,195]],gaps:[[.195,.009],[.425,.011],[.735,.010]],
+     boosts:[.08,.27,.35,.55,.67,.87],coins:[.07,.145,.30,.46,.58,.76,.94],wave:[43,17],style:'QUICK CRESTS · WOODLAND GAPS'},
+    {id:'canyon-drop',name:'CANYON DROP',biome:2,finishX:42000,grade:.282,
+     hills:[[.13,1450,-180],[.27,960,190],[.40,1280,-180],[.53,1100,200],[.69,1400,-170],[.84,1200,180]],
+     ramps:[[.21,135,145,235],[.445,125,130,240],[.68,135,140,245],[.855,125,118,220]],gaps:[[.245,.013],[.475,.013],[.715,.014],[.88,.010]],
+     boosts:[.085,.19,.34,.56,.64,.79,.92],coins:[.07,.16,.34,.55,.62,.79,.94],wave:[49,18],style:'DEEP DROPS · FOUR RECOVERABLE CHASMS'},
+    {id:'frozen-rush',name:'FROZEN RUSH',biome:3,finishX:39900,grade:.263,
+     hills:[[.14,1300,-100],[.31,1050,150],[.49,940,-120],[.64,980,128],[.81,1300,-145]],
+     ramps:[[.19,140,93,195],[.43,120,100,210],[.67,130,105,210],[.87,115,94,195]],gaps:[[.215,.010],[.455,.011],[.70,.012]],
+     boosts:[.075,.28,.40,.54,.65,.78,.91],coins:[.06,.14,.29,.39,.56,.80,.93],wave:[23,10],style:'FAST FLOW · ICE-SLICK CRESTS'},
+    {id:'temple-tumble',name:'TEMPLE TUMBLE',biome:1,finishX:43000,grade:.266,
+     hills:[[.13,1080,155],[.24,1200,-150],[.38,950,160],[.51,1250,-195],[.65,1080,120],[.80,1100,-135]],
+     ramps:[[.155,95,84,180],[.365,120,120,215],[.575,110,130,235],[.79,110,90,210]],gaps:[[.185,.009],[.395,.012],[.602,.011],[.82,.010]],
+     boosts:[.07,.275,.34,.48,.69,.77,.91],coins:[.075,.245,.32,.47,.65,.76,.93],wave:[37,16],style:'RHYTHM JUMPS · FOUR TEMPLE GAPS'},
+    {id:'stormspill-ridge',name:'STORMSPILL RIDGE',biome:3,finishX:44500,grade:.289,
+     hills:[[.10,1270,-160],[.24,920,145],[.36,1150,-180],[.51,1050,170],[.63,1280,-190],[.82,1420,160]],
+     ramps:[[.225,128,115,225],[.46,120,125,225],[.69,140,138,235],[.855,112,105,205]],gaps:[[.255,.014],[.49,.012],[.72,.013]],
+     boosts:[.075,.18,.33,.54,.64,.80,.92],coins:[.07,.145,.32,.405,.59,.805,.94],wave:[58,21],style:'ROUGH RIDGES · WINDY CHAIN JUMPS'},
+    {id:'magma-mile',name:'MAGMA MILE',biome:2,finishX:39000,grade:.297,
+     hills:[[.12,990,175],[.26,1000,-205],[.40,1300,205],[.57,1450,-175],[.73,1150,180],[.87,970,-145]],
+     ramps:[[.175,120,115,210],[.405,140,140,250],[.66,145,130,240]],gaps:[[.205,.010],[.445,.014],[.695,.015]],
+     boosts:[.095,.29,.395,.55,.645,.80,.92],coins:[.065,.155,.29,.37,.58,.795,.93],wave:[48,20],style:'LAVA WAVES · THREE BIG CLEARS'},
+    {id:'skybridge-sprint',name:'SKYBRIDGE SPRINT',biome:3,finishX:34600,grade:.278,
+     hills:[[.11,850,-95],[.24,760,110],[.36,820,-95],[.50,850,130],[.63,850,-125],[.76,790,100]],
+     ramps:[[.155,95,95,195],[.335,85,93,180],[.51,88,92,185],[.695,100,100,210],[.86,95,90,195]],
+     gaps:[[.18,.010],[.365,.010],[.54,.011],[.725,.011],[.89,.009]],
+     boosts:[.075,.255,.325,.48,.665,.825,.94],coins:[.065,.25,.32,.45,.65,.80,.945],wave:[29,11],style:'FIVE SHORT BRIDGES · FAST TIMING'},
+    {id:'goldrush-gulch',name:'GOLDRUSH GULCH',biome:2,finishX:45500,grade:.273,
+     hills:[[.11,1400,-180],[.25,1120,165],[.39,1370,-195],[.55,1290,190],[.69,1480,-155],[.85,1120,145]],
+     ramps:[[.17,110,95,210],[.37,125,110,225],[.57,128,122,220],[.76,120,104,205]],gaps:[[.20,.011],[.405,.013],[.605,.011],[.79,.010]],
+     boosts:[.075,.29,.35,.51,.67,.74,.92],coins:[.065,.15,.285,.34,.525,.70,.915],wave:[42,16],style:'LONG HAUL · FOUR CHALLENGES'},
+    {id:'vaultfall-finals',name:'VAULTFALL FINALS',biome:0,finishX:47000,grade:.290,
+     hills:[[.10,1430,-195],[.23,1250,170],[.38,1450,-210],[.51,1180,180],[.66,1450,-190],[.82,1070,165]],
+     ramps:[[.13,105,105,215],[.31,128,125,235],[.485,120,130,240],[.665,125,128,230],[.835,130,120,220]],
+     gaps:[[.157,.011],[.34,.012],[.515,.014],[.695,.013],[.865,.012]],
+     boosts:[.065,.20,.29,.435,.625,.805,.94],coins:[.075,.21,.285,.445,.605,.78,.93],wave:[49,17],style:'FINAL GAUNTLET · FIVE VAULT GAPS'}
   ];
 
   const TRACKS=defs.map((d,index)=>{
-    const [id,name,biome,finishX,grade,hills,ramps,gaps,boostFractions]=d;
-    const track={id,name,index,biome,finishX,grade,
+    const {id,name,biome,finishX,grade,hills,ramps,gaps,boosts,coins,wave,style}=d;
+    const track={id,name,index,biome,finishX,grade,style,wave,
       hills:hills.map(([f,w,h])=>({x:finishX*f,width:w,height:h})),
       ramps:ramps.map(([f,len,height,launch],i)=>({id:i,x:finishX*f,end:finishX*f+len,recovery:finishX*f+len+260,height,launch})),
-      gaps:gaps.map(([f,w],i)=>({id:i,x:finishX*f,end:finishX*f+finishX*w,respawnX:finishX*f+finishX*w+70})),
-      boosts:boostFractions.map((f,i)=>({id:i,x:finishX*f,yOffset:i%2===0?48:78})),
+      gaps:gaps.map(([f,w],i)=>({id:i,x:finishX*f,end:finishX*(f+w),respawnX:finishX*(f+w)+90})),
+      boosts:boosts.map((f,i)=>({id:i,x:finishX*f,yOffset:[44,54,66,44,56,70,46][i]})),
       coinClusters:[]
     };
-    // Create readable coin arcs throughout the course. Every player has their own coins.
-    for(let i=0;i<10;i++){
-      const f=.07+i*.086 + ((index*17+i*7)%11)*.0015;
-      if(f>.95)break;
-      track.coinClusters.push({x:finishX*f,count:5+(i%3),spacing:34,arc:i%2?58:28});
-    }
+    // Scarce but collectible: 7 small caches, 3 or 4 coins each (24 total).
+    // Ground-friendly low arcs let players earn a few carefully timed shots.
+    for(let i=0;i<coins.length;i++)track.coinClusters.push({x:finishX*coins[i],count:i%3===1?4:3,spacing:36,arc:12+(i%2)*9});
     return track;
   });
   const byId=new Map(TRACKS.map(t=>[t.id,t]));
@@ -58,7 +92,7 @@
   }
   function terrainAt(trackOrId,x){
     const t=typeof trackOrId==='string'?getTrack(trackOrId):trackOrId;
-    const wave=Math.sin(x/1900*TAU+t.index*.71)*34+Math.sin(x/620*TAU+t.index*1.17)*13;
+    const wave=Math.sin(x/1900*TAU+t.index*.71)*t.wave[0]+Math.sin(x/620*TAU+t.index*1.17)*t.wave[1];
     let y=220+x*t.grade+wave+hillContribution(t,x);
     for(const r of t.ramps)y-=rampLift(r,x);
     return y;
@@ -78,6 +112,6 @@
     for(const boost of t.boosts){items.push({id:'b'+boost.id,type:'boost',boostIndex:boost.id,x:boost.x,y:terrainAt(t,boost.x)-boost.yOffset,hit:false,shared:true});}
     return items.sort((a,b)=>a.x-b.x);
   }
-  function publicTracks(){return TRACKS.map(t=>({id:t.id,name:t.name,index:t.index,biome:t.biome,finishX:t.finishX,gaps:t.gaps.length,boosts:t.boosts.length}));}
+  function publicTracks(){return TRACKS.map(t=>({id:t.id,name:t.name,index:t.index,biome:t.biome,finishX:t.finishX,gaps:t.gaps.length,boosts:t.boosts.length,style:t.style,coins:t.coinClusters.reduce((n,c)=>n+c.count,0)}));}
   return {TRACKS,getTrack,terrainAt,slopeAt,gapAt,makeItems,publicTracks,clamp};
 });

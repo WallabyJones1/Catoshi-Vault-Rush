@@ -50,7 +50,7 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now}){
   function applyInput(p,m,code,restoring=false){
     if(p.forfeited||p.finishMs!==null)return;
     if(code===1)p.run.press();else if(code===0)p.run.release();else if(code===3){if(p.run.activateBoost()&&!restoring)io.to('match:'+m.id).emit('race:event',{type:'boost-used',seat:p.seat});}else if(code===2){
-      if(p.run.spendShot()&&m.projectiles.length<MAX_PROJECTILES){const r=p.run.player;m.projectiles.push({id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color,x:r.x+28,y:r.y-24,vx:1180,life:1.7});if(!restoring)io.to('match:'+m.id).emit('race:event',{type:'shot',seat:p.seat,x:r.x,y:r.y});}
+      if(m.projectiles.length<MAX_PROJECTILES&&p.run.spendShot()){const r=p.run.player;m.projectiles.push({id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color,x:r.x+28,y:r.y-24,vx:1180,life:1.7});if(!restoring)io.to('match:'+m.id).emit('race:event',{type:'shot',seat:p.seat,x:r.x,y:r.y});}
     }
   }
   function applyRecordedInputs(m){for(const p of m.players.values()){while(p.inputCursor<p.inputs.length&&p.inputs[p.inputCursor][0]<=m.tick){const [tick,code]=p.inputs[p.inputCursor++];if(tick===m.tick)applyInput(p,m,code,true);}}}

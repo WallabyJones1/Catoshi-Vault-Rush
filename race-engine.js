@@ -9,6 +9,8 @@
   const TAU=Math.PI*2;
   const angleDelta=a=>Math.atan2(Math.sin(a),Math.cos(a));
   const COINS_PER_SHOT=5;
+  const SHOT_COOLDOWN=3.5;
+  const MAX_BOOST_CHARGES=3;
   const MAX_SPEED=940;
   const BOOST_SPEED=1040;
 
@@ -17,7 +19,7 @@
       this.track=getTrack(trackId);this.trackId=this.track.id;
       this.ramps=this.track.ramps.map(r=>({...r,y:terrainAt(this.track,r.x),endY:terrainAt(this.track,r.end)}));
       this.gaps=this.track.gaps.map(g=>({...g}));this.rails=[];this.scenery=[];
-      this.items=makeItems(this.track);this.events=[];this.time=0;this.score=0;this.coins=0;this.coinsCollected=0;this.boostCharges=0;this.shots=0;this.hits=0;this.respawns=0;
+      this.items=makeItems(this.track);this.events=[];this.time=0;this.score=0;this.coins=0;this.coinsCollected=0;this.boostCharges=0;this.shotCooldown=0;this.shots=0;this.hits=0;this.respawns=0;
       this.maxLives=3;this.lives=3;this.heartsCollected=0;this.redTokens=0;this.rushPickups=0;
       this.dead=false;this.finished=false;this.reason='';this.previousPlayer=null;this.sharedBoostMask=0;
       this.dog={active:false,distance:9999,warning:false};
@@ -46,9 +48,9 @@
     press(){if(this.dead||this.finished)return;const p=this.player;if(p.held)return;p.held=true;p.heldTime=0;p.buffer=.14;if(p.grounded||p.coyote>0)this.jump();}
     release(){const p=this.player;p.held=false;p.heldTime=0;}
     jump(){const p=this.player;if(this.dead||this.finished||(!p.grounded&&p.coyote<=0))return;p.grounded=false;p.ramp=null;p.coyote=0;p.vy-=245;p.vx=Math.max(p.vx,p.speed);p.airborne=0;this.event('jump',{x:p.x,y:p.y});}
-    spendShot(){if(this.coins<COINS_PER_SHOT||this.dead||this.finished)return false;this.coins-=COINS_PER_SHOT;this.shots++;this.event('shot',{x:this.player.x,y:this.player.y});return true;}
+    spendShot(){if(this.coins<COINS_PER_SHOT||this.shotCooldown>0||this.dead||this.finished)return false;this.coins-=COINS_PER_SHOT;this.shotCooldown=SHOT_COOLDOWN;this.shots++;this.event('shot',{x:this.player.x,y:this.player.y});return true;}
     applyHit(){const p=this.player;if(this.dead||this.finished||p.invulnerable>0)return false;const before=p.speed;p.speed=Math.max(260,p.speed*.72);p.vx=Math.min(p.vx,p.speed);p.stagger=.38;p.invulnerable=.70;p.boost=0;this.event('stumble',{x:p.x,y:p.y,heavy:false,material:'metal',kind:'coin-shot',lifeLost:false,lives:this.lives,loss:before-p.speed});return true;}
-    claimBoost(){if(this.dead||this.finished||this.boostCharges>=2)return false;this.boostCharges++;this.rushPickups++;this.event('boost-ready',{charges:this.boostCharges});return true;}
+    claimBoost(){if(this.dead||this.finished||this.boostCharges>=MAX_BOOST_CHARGES)return false;this.boostCharges++;this.rushPickups++;this.event('boost-ready',{charges:this.boostCharges});return true;}
     activateBoost(){if(this.dead||this.finished||this.boostCharges<=0)return false;this.boostCharges--;this.applyBoost();return true;}
     applyBoost(){const p=this.player;if(this.dead||this.finished)return;p.speed=Math.max(p.speed,BOOST_SPEED);p.vx=Math.max(p.vx,BOOST_SPEED*.94);p.boost=2.8;this.event('rush',{x:p.x,y:p.y,seconds:2.8});}
     finish(){if(this.finished)return;this.finished=true;this.reason='FINISH';this.release();this.event('finish',{x:this.player.x,y:this.player.y});}
@@ -58,7 +60,7 @@
     step(dt){
       if(this.dead||this.finished)return;
       const p=this.player;this.previousPlayer={x:p.x,y:p.y,speed:p.speed,vx:p.vx,vy:p.vy,angle:p.angle,grounded:p.grounded};
-      this.time+=dt;p.buffer=Math.max(0,p.buffer-dt);p.coyote=Math.max(0,p.coyote-dt);p.invulnerable=Math.max(0,p.invulnerable-dt);p.boost=Math.max(0,p.boost-dt);p.stagger=Math.max(0,p.stagger-dt);p.respawnFreeze=Math.max(0,p.respawnFreeze-dt);if(p.held)p.heldTime+=dt;
+      this.time+=dt;this.shotCooldown=Math.max(0,this.shotCooldown-dt);p.buffer=Math.max(0,p.buffer-dt);p.coyote=Math.max(0,p.coyote-dt);p.invulnerable=Math.max(0,p.invulnerable-dt);p.boost=Math.max(0,p.boost-dt);p.stagger=Math.max(0,p.stagger-dt);p.respawnFreeze=Math.max(0,p.respawnFreeze-dt);if(p.held)p.heldTime+=dt;
       const previousX=p.x,previousY=p.y;
       if(p.respawnFreeze>0){p.vx=0;p.vy=0;return;}
       if(p.grounded){
@@ -91,8 +93,8 @@
       this.score+=(p.x-previousX)*.02;
       if(p.x>=this.track.finishX)this.finish();
     }
-    snapshot(){const p=this.player;return{x:p.x,y:p.y,speed:p.speed,vx:p.vx,vy:p.vy,angle:p.angle,grounded:p.grounded,held:p.held,heldTime:p.heldTime,airborne:p.airborne,invulnerable:p.invulnerable,boost:p.boost,stagger:p.stagger,respawnFreeze:p.respawnFreeze,coins:this.coins,coinsCollected:this.coinsCollected,boostCharges:this.boostCharges,shots:this.shots,hits:this.hits,respawns:this.respawns,finished:this.finished,score:Math.floor(this.score)};}
-    applySnapshot(s){if(!s)return;const p=this.player;this.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle','grounded','held','heldTime','airborne','invulnerable','boost','stagger','respawnFreeze'])if(s[k]!==undefined)p[k]=s[k];for(const k of ['coins','coinsCollected','boostCharges','shots','hits','respawns','finished','score'])if(s[k]!==undefined)this[k]=s[k];}
+    snapshot(){const p=this.player;return{x:p.x,y:p.y,speed:p.speed,vx:p.vx,vy:p.vy,angle:p.angle,grounded:p.grounded,held:p.held,heldTime:p.heldTime,airborne:p.airborne,invulnerable:p.invulnerable,boost:p.boost,stagger:p.stagger,respawnFreeze:p.respawnFreeze,coins:this.coins,coinsCollected:this.coinsCollected,boostCharges:this.boostCharges,shotCooldown:this.shotCooldown,shots:this.shots,hits:this.hits,respawns:this.respawns,finished:this.finished,score:Math.floor(this.score)};}
+    applySnapshot(s){if(!s)return;const p=this.player;this.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle','grounded','held','heldTime','airborne','invulnerable','boost','stagger','respawnFreeze'])if(s[k]!==undefined)p[k]=s[k];for(const k of ['coins','coinsCollected','boostCharges','shotCooldown','shots','hits','respawns','finished','score'])if(s[k]!==undefined)this[k]=s[k];}
   }
-  return {RaceRun,COINS_PER_SHOT,MAX_SPEED,BOOST_SPEED,VERSION:'race-web-5'};
+  return {RaceRun,COINS_PER_SHOT,SHOT_COOLDOWN,MAX_BOOST_CHARGES,MAX_SPEED,BOOST_SPEED,VERSION:'race-web-7'};
 });
