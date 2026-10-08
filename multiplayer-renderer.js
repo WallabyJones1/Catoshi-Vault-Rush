@@ -126,7 +126,7 @@
     }
     remoteRacers(run,left,right,portrait){
       const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=Number.isFinite(r.y)?r.y:run.terrain(r.x),frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(r.angle||0);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
-      for(const q of this.projectiles){if(q.x<left-30||q.x>right+30)continue;ctx.save();ctx.globalAlpha=.9;ctx.fillStyle=q.color||'#f4c542';ctx.beginPath();ctx.arc(q.x,q.y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#f2efe9';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();}
+      for(const q of this.projectiles){if(q.x<left-30||q.x>right+30)continue;ctx.save();ctx.translate(q.x,q.y);ctx.rotate(q.angle||0);ctx.globalAlpha=.95;ctx.drawImage(this.images.coin,-9,-9,18,18);ctx.restore();}
     }
     burst(x, y, color, amount, strength) {
       for (let i = 0; i < amount; i++) this.particles.push({
@@ -253,6 +253,7 @@
         for(const key of ['x','y','speed','vx','vy'])this.visualPlayer[key]=old[key]+(current[key]-old[key])*t;
         this.visualPlayer.angle=old.angle+Math.atan2(Math.sin(current.angle-old.angle),Math.cos(current.angle-old.angle))*t;
       }
+      if(this.networkOffset){for(const key of ['x','y','angle'])this.visualPlayer[key]+=this.networkOffset[key]||0;}
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;

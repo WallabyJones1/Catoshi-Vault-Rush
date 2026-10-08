@@ -8,11 +8,12 @@
   const screens=Array.from(document.querySelectorAll('.screen'));
   const canvas=$('game'),shell=canvas.parentElement,ctx=canvas.getContext('2d');
   const STEP=1/60;
-  let run=null,renderer=null,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,inputPointer=null,keyHeld=false,startId=0;
+  let run=null,renderer=null,prediction=null,remotes=null,lastSnapshotAt=0,connected=true,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,inputPointer=null,keyHeld=false,startId=0;
 
   function show(id){screens.forEach(screen=>screen.classList.toggle('active',screen.id===id));}
   function setStatus(message,kind=''){window.RushMultiplayer?.setStatus?.(message,kind);}
-  function releaseHeld(){if(run?.player.held){window.RushMultiplayer?.input?.('jumpUp');run.release();}}
+  function send(type){const seq=window.RushMultiplayer?.input?.(type);prediction?.record(type,seq);}
+  function releaseHeld(){if(run?.player.held){send('jumpUp');run.release();}}
   function releaseInput(){inputPointer=null;keyHeld=false;releaseHeld();}
   function stopRace({forfeit=false}={}){if(forfeit&&ticket?.matchId&&phase!=='result')window.RushMultiplayer?.forfeit?.();startId++;cancelAnimationFrame(raf);releaseInput();sound.setPlaying(false);run=null;renderer=null;ticket=null;phase='menu';$('race-standings').hidden=true;window.RushMultiplayer?.leaveRaceView?.();show('multiplayer-home');window.RushMultiplayer?.returnHome?.();}
   function drawLoading(){if(!ctx)return;ctx.fillStyle='#0a0908';ctx.fillRect(0,0,canvas.width,canvas.height);}
@@ -23,11 +24,12 @@
     if(phase==='loading'||!multiplayerTicket?.matchId)return;
     sound.unlock();sound.setPlaying(false);const operation=++startId,receivedAt=performance.now();cancelAnimationFrame(raf);releaseInput();phase='loading';ticket=multiplayerTicket;lastRaceMode=ticket.mode||'public';$('mode-label').textContent=(ticket.trackName||'MULTIPLAYER')+' · '+ticket.playerCount+' RACERS';$('countdown').textContent='LOADING';$('race-standings').hidden=false;show('game-screen');resizeGame();drawLoading();
     try{
-      if(!ctx||typeof VaultRace==='undefined'||typeof VaultRushRenderer==='undefined')throw Error('Multiplayer game unavailable.');
+      if(!ctx||typeof VaultRace==='undefined'||typeof VaultRushRenderer==='undefined'||typeof VaultRaceNet==='undefined')throw Error('Multiplayer game unavailable.');
       const images=await artworkReady();if(operation!==startId)return;
-      renderer=new VaultRushRenderer.Renderer(ctx,images);run=new VaultRace.RaceRun(ticket.trackId);renderer.setRaceIdentity?.({name:window.RushMultiplayer?.name?.()||'YOU',color:window.RushMultiplayer?.color?.()||'#f4c542',seat:ticket.seat});renderer.reset(run);renderer.breakout(run);renderer.draw(run);
+      renderer=new VaultRushRenderer.Renderer(ctx,images);run=new VaultRace.RaceRun(ticket.trackId);prediction=new VaultRaceNet.Prediction(run);remotes=new VaultRaceNet.RemoteBuffer();connected=true;lastSnapshotAt=performance.now();renderer.setRaceIdentity?.({name:window.RushMultiplayer?.name?.()||'YOU',color:window.RushMultiplayer?.color?.()||'#f4c542',seat:ticket.seat});renderer.reset(run);renderer.breakout(run);renderer.draw(run);
       const delay=ticket.startDelayMs??ticket.startAt-(ticket.serverTime??Date.now());
       phase='countdown';countdown=Math.max(.05,(delay-(performance.now()-receivedAt))/1000);accumulator=0;trickTime=0;$('countdown').textContent='READY';updateHud();sound.setPlaying(true);last=performance.now();canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);
+      const latest=window.RushMultiplayer?.current?.()?.snapshot;if(latest?.matchId===ticket.matchId)multiplayerSnapshot(latest);
     }catch(error){if(operation!==startId)return;stopRace({forfeit:true});setStatus(error.message||'Could not load the race. Please retry.','error');}
   }
 
@@ -46,18 +48,22 @@
     if(phase==='countdown'){
       countdown-=dt;$('countdown').textContent=countdown>.8?'READY':countdown>.15?'GO!':'';if(countdown<=0){phase='running';$('countdown').textContent='';accumulator=0;}
     }else if(phase==='running'){
-      accumulator+=dt;while(accumulator>=STEP&&phase==='running'){run.step(STEP);handleLocalEvents();accumulator-=STEP;}trickTime-=dt;if(trickTime<=0)$('trick').classList.remove('visible');updateHud();
+      if(connected&&now-lastSnapshotAt<1500){accumulator+=dt;while(accumulator>=STEP&&phase==='running'){prediction.step();handleLocalEvents();accumulator-=STEP;}$('countdown').textContent=run.finished?'FINISH!':'';}else{accumulator=0;$('countdown').textContent='RECONNECTING';}
+      trickTime-=dt;if(trickTime<=0)$('trick').classList.remove('visible');updateHud();
     }
+    const remote=remotes.sample(now);renderer.setRaceEntities(remote.players.filter(p=>p.seat!==ticket.seat));renderer.setProjectiles(remote.projectiles);renderer.networkOffset=prediction.smooth(dt);
     renderer.update(run,dt,phase==='running'?accumulator/STEP:1);renderer.draw(run);if(['running','countdown'].includes(phase))raf=requestAnimationFrame(loop);
   }
-  function press(){if(phase!=='running'||run?.player.held)return;window.RushMultiplayer?.input?.('jumpDown');run.press();handleLocalEvents();}
-  function fire(){if(phase!=='running'||!run?.spendShot?.())return;window.RushMultiplayer?.input?.('fire');handleLocalEvents();updateHud();}
-  function boost(){if(phase!=='running'||!run?.activateBoost?.())return;window.RushMultiplayer?.input?.('boost');handleLocalEvents();updateHud();}
+  function press(){if(phase!=='running'||!connected||run?.player.held)return;send('jumpDown');run.press();handleLocalEvents();}
+  function fire(){if(phase!=='running'||!connected||!run?.spendShot?.())return;send('fire');handleLocalEvents();updateHud();}
+  function boost(){if(phase!=='running'||!connected||!run?.activateBoost?.())return;send('boost');handleLocalEvents();updateHud();}
 
   function multiplayerSnapshot(snapshot){
     if(!run||!ticket||snapshot.matchId!==ticket.matchId)return;const me=snapshot.players.find(p=>p.seat===ticket.seat);
-    if(me){const p=run.player,dx=me.x-p.x,dy=me.y-p.y;if(Math.abs(dx)>160||Math.abs(dy)>180)run.applySnapshot(me);else{run.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle'])if(Number.isFinite(me[k]))p[k]+=(me[k]-p[k])*.42;for(const k of ['grounded','held','heldTime','airborne','invulnerable','boost','stagger','respawnFreeze'])if(me[k]!==undefined)p[k]=me[k];for(const k of ['coins','coinsCollected','boostCharges','shotCooldown','shots','hits','respawns','finished','score'])if(me[k]!==undefined)run[k]=me[k];}}
-    run.syncBoostMask?.(snapshot.boostMask||0);renderer?.setRaceEntities?.(snapshot.players.filter(p=>p.seat!==ticket.seat));renderer?.setProjectiles?.(snapshot.projectiles||[]);updateHud();
+    if(!me||!prediction.reconcile(snapshot,ticket.seat))return;
+    lastSnapshotAt=performance.now();connected=true;remotes.push(snapshot,lastSnapshotAt);
+    if(phase==='countdown'&&snapshot.status==='running'){phase='running';accumulator=0;last=performance.now();$('countdown').textContent='';}
+    updateHud();
   }
   function multiplayerEvent(event){
     if(!renderer||!run)return;
@@ -77,5 +83,5 @@
   window.addEventListener('keyup',event=>{if(['Space','ArrowUp','KeyW'].includes(event.code)){keyHeld=false;if(inputPointer===null)releaseHeld();}});
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&phase==='running'){last=performance.now();accumulator=0;}});
 
-  window.VaultRushGame={startMultiplayer:ticket=>{if(phase!=='menu'&&window.RushMultiplayer?.current?.()?.ticket?.matchId===ticket?.matchId)return;begin(ticket);},multiplayerSnapshot,multiplayerEvent,multiplayerFinished,multiplayerConnection:()=>{},returnToMenu:()=>stopRace(),mode:()=>phase};
+  window.VaultRushGame={startMultiplayer:next=>{if(phase!=='menu'&&ticket?.matchId===next?.matchId)return;begin(next);},multiplayerSnapshot,multiplayerEvent,multiplayerFinished,multiplayerInputAck:reply=>{if(!reply.ok)prediction?.reject(reply.seq);},multiplayerConnection:value=>{connected=value;if(!value){releaseInput();if(prediction)prediction.pending=[];}},returnToMenu:()=>stopRace(),mode:()=>phase};
 })();

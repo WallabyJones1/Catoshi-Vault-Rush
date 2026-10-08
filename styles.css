@@ -201,4 +201,5 @@ a.multiplayer-cta{min-height:48px;border-radius:3px;padding:12px 18px;color:var(
 .multiplayer-page .multi-controls #fire-control b{font-weight:500;color:#f0c07c}
 .multiplayer-page .race-ammo{white-space:nowrap}
 .multiplayer-page .multi-controls #boost-count{letter-spacing:.05em}
+.multiplayer-page .control-strip.multi-controls:has(.fire-control:not([hidden])){display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
 @media(max-width:560px){.multiplayer-page .multi-controls #fire-control span{font-size:9px}.multiplayer-page .multi-controls #control-help{font-size:10px}}

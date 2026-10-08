@@ -21,12 +21,13 @@ for(const name of ['index.html','multiplayer.html','replay.html']){
     assert.ok(fs.existsSync(path.join(root,asset)),name+' references a missing asset: '+asset);
   }
 }
-assert.match(read('index.html'),/href="catoshi-classic-home\.css\?v=site-repair-19"/,'The homepage theme must be linked.');
+assert.match(read('index.html'),/href="catoshi-classic-home\.css\?v=site-repair-20"/,'The homepage theme must be linked.');
 assert.doesNotMatch(read('index.html'),/<script[^>]+src="(?:race-engine|multiplayer-game|multiplayer-renderer)\.js/,'Race code must not execute in the solo page.');
 assert.match(read('multiplayer.html'),/src="multiplayer-renderer\.js/,'Multiplayer must use its isolated renderer.');
+assert.match(read('multiplayer.html'),/src="race-net\.js/,'Race prediction must load before racing.');
 for(const file of ['multiplayer-server.cjs','multiplayer.cjs']){
   assert.match(read(file),/require\('\.\/mp-security\.cjs'\)/);
   assert.doesNotMatch(read(file),/require\('\.\/security\.cjs'\)/,'Multiplayer must not replace or depend on solo security.');
 }
 assert.match(read('styles.css'),/\.multiplayer-embedded\[hidden\]\{display:none!important\}/,'The multiplayer panel must stay hidden until selected.');
-console.log('Verified site-repair-19: solo engine, homepage, assets and isolated multiplayer are ready.');
+console.log('Verified site-repair-20: solo engine, homepage, assets and isolated multiplayer are ready.');

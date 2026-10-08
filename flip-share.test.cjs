@@ -61,7 +61,7 @@ test('X tweet uses one branded verified score URL and a large-image card, not Ra
  const intent=new URL(h.el('share-x').href);
  assert.equal(intent.origin,'https://x.com');
  assert.equal(intent.searchParams.get('url'),'https://vaultrush.catoshirush.fun/trial-score/00000000-0000-0000-0000-000000000001');
- assert.equal(intent.searchParams.get('text'),'I finished DUNE DASH in 11.399s on Catoshi Vault Rush. Can you beat me?');
+ assert.equal(intent.searchParams.get('text'),'I just got: 11.399s on DUNE DASH!\n\nThink you can beat me?\n\nTry here:\n');
  assert(!intent.searchParams.get('text').includes('railway'));
  assert.equal((h.el('share-x').href.match(/trial-score/g)||[]).length,1);
  assert.equal(h.el('share-x').onclick,null);

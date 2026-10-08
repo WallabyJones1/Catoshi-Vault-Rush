@@ -138,8 +138,8 @@
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
     const seconds=((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3);
     const caption=trial
-      ?`I finished ${run.trial.name} in ${seconds}s on Catoshi Vault Rush. Can you beat me?`
-      :`I scored ${score.toLocaleString()} points on Catoshi Vault Rush. Can you beat me?`;
+      ?`I just got: ${seconds}s on ${run.trial.name}!\n\nThink you can beat me?\n\nTry here:\n`
+      :`I just got: ${score.toLocaleString()} points on Catoshi Vault Rush!\n\nThink you can beat me?\n\nTry here:\n`;
     const playUrl=SHARE_ORIGIN+'/'+(trial?'?trial='+encodeURIComponent(run.trial.id):'');
     let recordPath='';
     try{recordPath=new URL(result?.url).pathname;}catch{}

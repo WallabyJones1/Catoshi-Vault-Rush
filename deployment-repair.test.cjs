@@ -28,21 +28,21 @@ test('Railway entrypoint serves both games, proxies two real race clients and pr
       await pause(100);
     }
     assert.ok(ready,'Both services must start: '+logs);
-    const health=await(await fetch(origin+'/health')).json();assert.equal(health.build,'site-repair-19');assert.equal(health.engine,require('./engine.js').VERSION);
+    const health=await(await fetch(origin+'/health')).json();assert.equal(health.build,'site-repair-20');assert.equal(health.engine,require('./engine.js').VERSION);
     const html=await(await fetch(origin+'/')).text();
     assert.match(html,/multiplayer-embedded"[^>]*hidden/);
-    assert.match(html,/catoshi-classic-home\.css\?v=site-repair-19/);
+    assert.match(html,/catoshi-classic-home\.css\?v=site-repair-20/);
     const mhtml=await(await fetch(origin+'/mp/')).text();assert.match(mhtml,/<base href="\/mp\/">/);
     for(const [page,base]of [[html,origin+'/'],[mhtml,origin+'/mp/']]){
       const assets=[...page.matchAll(/(?:src|href)="([^"?#]+)(?:[?#][^"]*)?"/g)].map(m=>m[1]).filter(v=>!v.includes(':')&&v!=='#'&&/\.(js|css|woff2|gif)$/.test(v));
       for(const asset of assets){const r=await fetch(new URL(asset,base));assert.equal(r.status,200,'Asset must be served: '+asset);}
     }
-    async function join(){
+    async function join(transport='websocket'){
       const r=await fetch(origin+'/mp/');const cookie=r.headers.get('set-cookie').split(';')[0];
-      const socket=io(origin,{path:'/mp/socket.io',transports:['websocket'],reconnection:false,autoConnect:false,extraHeaders:{Cookie:cookie,Origin:origin}});clients.push(socket);
+      const socket=io(origin,{path:'/mp/socket.io',transports:[transport],upgrade:false,reconnection:false,autoConnect:false,extraHeaders:{Cookie:cookie,Origin:origin}});clients.push(socket);
       const connected=event(socket,'connect');socket.connect();await connected;return {socket,cookie};
     }
-    const a=await join(),b=await join();
+    const a=await join(),b=await join('polling');
     // Cross-origin WebSocket clients are refused even with a valid player cookie.
     const bad=io(origin,{path:'/mp/socket.io',transports:['websocket'],reconnection:false,autoConnect:false,extraHeaders:{Cookie:a.cookie,Origin:'https://unrelated.example','X-Catoshi-Origin':'https://unrelated.example'}});clients.push(bad);
     const denied=event(bad,'connect_error');bad.connect();await denied;bad.disconnect();

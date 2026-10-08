@@ -4,7 +4,7 @@ const {HttpError,playerName}=require('./mp-security.cjs');
 const {currentRound,roundWindow}=require('./periods.cjs');
 const {getTrack,publicTracks}=require('./race-tracks.js');
 
-const MIN_PLAYERS=2,MAX_PLAYERS=8,QUEUE_WAIT_MS=9000,QUEUE_STALE_MS=30000,START_DELAY_MS=5000,RACE_SECONDS=110,COUNTED_RACES=30;
+const MIN_PLAYERS=2,MAX_PLAYERS=8,QUEUE_WAIT_MS=12000,QUEUE_STALE_MS=120000,START_DELAY_MS=5000,RACE_SECONDS=110,COUNTED_RACES=30;
 const BASE_POINTS=[25,18,15,12,10,8,6,4];
 const COLORS=['#f4c542','#ff7043','#ef5350','#ec407a','#ab47bc','#7e57c2','#5c6bc0','#42a5f5','#26c6da','#26a69a','#66bb6a','#d4e157','#ffffff','#b0bec5'];
 function playerColor(value){const v=String(value||'').toLowerCase();const found=COLORS.find(c=>c.toLowerCase()===v);return found||COLORS[0];}
@@ -31,7 +31,7 @@ function ensureMultiplayerSchema(db){
   addColumn(db,'multiplayer_players','color',"TEXT NOT NULL DEFAULT '#f4c542'");
   addColumn(db,'multiplayer_queue','color',"TEXT NOT NULL DEFAULT '#f4c542'");
   for(const [name,type] of [['track_id',"TEXT NOT NULL DEFAULT 'summit-smash'"],['server_tick','INTEGER NOT NULL DEFAULT 0'],['replay_id','TEXT']])addColumn(db,'multiplayer_matches',name,type);
-  for(const [name,type] of [['color',"TEXT NOT NULL DEFAULT '#f4c542'"],['connected','INTEGER NOT NULL DEFAULT 1'],['finish_ms','INTEGER'],['shots','INTEGER NOT NULL DEFAULT 0'],['hits','INTEGER NOT NULL DEFAULT 0'],['respawns','INTEGER NOT NULL DEFAULT 0']])addColumn(db,'multiplayer_match_players',name,type);
+  for(const [name,type] of [['color',"TEXT NOT NULL DEFAULT '#f4c542'"],['connected','INTEGER NOT NULL DEFAULT 1'],['finish_ms','INTEGER'],['last_seq','INTEGER NOT NULL DEFAULT -1'],['shots','INTEGER NOT NULL DEFAULT 0'],['hits','INTEGER NOT NULL DEFAULT 0'],['respawns','INTEGER NOT NULL DEFAULT 0']])addColumn(db,'multiplayer_match_players',name,type);
 }
 
 function createMultiplayer(db,{now=Date.now,engineVersion='race-web-1'}={}){
@@ -49,7 +49,8 @@ function createMultiplayer(db,{now=Date.now,engineVersion='race-web-1'}={}){
   function matchRows(matchId){return db.prepare('SELECT * FROM multiplayer_match_players WHERE match_id=? ORDER BY seat').all(matchId);}
   function match(matchId){return db.prepare('SELECT * FROM multiplayer_matches WHERE id=?').get(matchId)||null;}
   function setConnected(matchId,session,connected){db.prepare('UPDATE multiplayer_match_players SET connected=?,last_seen=? WHERE match_id=? AND session=?').run(connected?1:0,now(),matchId,session);}
-  function persistInputs(matchId,session,inputs){db.prepare('UPDATE multiplayer_match_players SET inputs=?,last_seen=? WHERE match_id=? AND session=?').run(JSON.stringify(inputs),now(),matchId,session);}
+  function persistInputs(matchId,session,inputs,lastSeq=-1){db.prepare('UPDATE multiplayer_match_players SET inputs=?,last_seq=?,last_seen=? WHERE match_id=? AND session=?').run(JSON.stringify(inputs),lastSeq,now(),matchId,session);}
+  function persistRace(matchId,tick,status,players){db.exec('BEGIN IMMEDIATE');try{setTick(matchId,tick,status);for(const p of players){persistInputs(matchId,p.session,p.inputs,p.lastSeq);setConnected(matchId,p.session,p.connected);}db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}}
   function setTick(matchId,tick,status){db.prepare('UPDATE multiplayer_matches SET server_tick=?,status=? WHERE id=? AND finalized IS NULL').run(tick,status,matchId);}
   function savePlayerResult(matchId,session,result){db.prepare(`UPDATE multiplayer_match_players SET finish_ms=?,score=?,distance=?,coins=?,shots=?,hits=?,respawns=?,forfeited=?,last_seen=? WHERE match_id=? AND session=?`).run(result.finishMs??null,result.score||0,result.distance||0,result.coins||0,result.shots||0,result.hits||0,result.respawns||0,result.forfeited?1:0,now(),matchId,session);}
   function finalize(matchId,ordered,replayFrames){let m=match(matchId);if(!m)throw new HttpError(404,'Race not found.');if(m.finalized!==null)return m;const t=now(),rows=matchRows(matchId),bySession=new Map(rows.map(r=>[r.session,r]));db.exec('BEGIN IMMEDIATE');try{const update=db.prepare('UPDATE multiplayer_match_players SET placement=?,points=?,forfeited=? WHERE match_id=? AND session=?');ordered.forEach((o,i)=>{const row=bySession.get(o.session);if(!row)return;update.run(i+1,o.forfeited||m.race_type==='bots'?0:scaledPoints(i+1,rows.length),o.forfeited?1:0,matchId,o.session);});let replayId=null;if(Array.isArray(replayFrames)&&replayFrames.length){replayId=crypto.randomBytes(9).toString('base64url');db.prepare('INSERT INTO multiplayer_replays(public_id,match_id,track_id,created,data)VALUES(?,?,?,?,?)').run(replayId,matchId,m.track_id,t,JSON.stringify(replayFrames));}db.prepare("UPDATE multiplayer_matches SET status='finished',finalized=?,replay_id=? WHERE id=? AND finalized IS NULL").run(t,replayId,matchId);db.exec('COMMIT');}catch(e){db.exec('ROLLBACK');throw e;}return match(matchId);}
@@ -92,6 +93,6 @@ function createMultiplayer(db,{now=Date.now,engineVersion='race-web-1'}={}){
   function replay(publicId){const row=db.prepare('SELECT * FROM multiplayer_replays WHERE public_id=?').get(String(publicId||''));if(!row)return null;return{id:row.public_id,matchId:row.match_id,trackId:row.track_id,createdAt:row.created,frames:JSON.parse(row.data)};}
   function recoverableMatches(){return db.prepare('SELECT * FROM multiplayer_matches WHERE finalized IS NULL AND finish_deadline>? ORDER BY created').all(now()-15000);}
   function abandonExpired(){const expired=db.prepare('SELECT id FROM multiplayer_matches WHERE finalized IS NULL AND finish_deadline<?').all(now());for(const x of expired){const rows=matchRows(x.id).map(r=>({session:r.session,forfeited:true}));if(rows.length)finalize(x.id,rows,[]);}return expired.length;}
-  return{createLobby,joinLobby,leaveLobby,lobbyState,lobbyMembers,startLobby,botPlayers,touchPlayer,joinQueue,leaveQueue,touchQueue,queueState,queued,removeQueued,getActiveMatch,createMatch,match,matchRows,setConnected,persistInputs,setTick,savePlayerResult,finalize,publicMatch,leaderboard,lifetimeLeaderboard,trackLeaderboard,profile,replay,recoverableMatches,abandonExpired,constants:{MIN_PLAYERS,MAX_PLAYERS,QUEUE_WAIT_MS,QUEUE_STALE_MS,START_DELAY_MS,RACE_SECONDS,COUNTED_RACES,COLORS}};
+  return{createLobby,joinLobby,leaveLobby,lobbyState,lobbyMembers,startLobby,botPlayers,touchPlayer,joinQueue,leaveQueue,touchQueue,queueState,queued,removeQueued,getActiveMatch,createMatch,match,matchRows,setConnected,persistInputs,persistRace,setTick,savePlayerResult,finalize,publicMatch,leaderboard,lifetimeLeaderboard,trackLeaderboard,profile,replay,recoverableMatches,abandonExpired,constants:{MIN_PLAYERS,MAX_PLAYERS,QUEUE_WAIT_MS,QUEUE_STALE_MS,START_DELAY_MS,RACE_SECONDS,COUNTED_RACES,COLORS}};
 }
 module.exports={ensureMultiplayerSchema,createMultiplayer,scaledPoints,playerColor,MIN_PLAYERS,MAX_PLAYERS,QUEUE_WAIT_MS,START_DELAY_MS,RACE_SECONDS,COUNTED_RACES,COLORS};

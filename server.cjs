@@ -12,7 +12,7 @@ const {picture}=require('./share-card.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
-const BUILD_ID='site-repair-19';
+const BUILD_ID='site-repair-20';
 // Public permalink and image previews never advertise an internal Railway host.
 const CANONICAL_SHARE_ORIGIN='https://vaultrush.catoshirush.fun';
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.

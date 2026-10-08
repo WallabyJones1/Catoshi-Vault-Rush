@@ -19,7 +19,7 @@ function offline(res,req){
  if(res.headersSent)return res.end();
  if((req.headers.accept||'').includes('text/html')){
    res.writeHead(503,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','Content-Security-Policy':"default-src 'self'; script-src 'none'; style-src 'self'; frame-ancestors 'self'; base-uri 'none'"});
-   res.end(`<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Multiplayer unavailable</title><link rel="stylesheet" href="/styles.css?v=site-repair-19"></head><body><main class="result"><div class="result-card"><p class="eyebrow">MULTIPLAYER</p><h2>RECONNECTING</h2><p class="practice-note">The main Vault Run and Speed Trials are still available.</p><a class="share-link" href="/" target="_top">BACK TO GAME</a></div></main></body></html>`);
+   res.end(`<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>Multiplayer unavailable</title><link rel="stylesheet" href="/styles.css?v=site-repair-20"></head><body><main class="result"><div class="result-card"><p class="eyebrow">MULTIPLAYER</p><h2>RECONNECTING</h2><p class="practice-note">The main Vault Run and Speed Trials are still available.</p><a class="share-link" href="/" target="_top">BACK TO GAME</a></div></main></body></html>`);
    return;
  }
  res.writeHead(503,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});
@@ -29,7 +29,7 @@ function forward(req,res){
   if(!isMpRoute(req.url))return false;
   if(closing)return offline(res,req),true;
   const headers={...req.headers,host:'127.0.0.1:'+port,'x-catoshi-origin':requestOrigin(req)};
-  const upstream=http.request({host:'127.0.0.1',port,path:strip(req.url),method:req.method,headers,timeout:7500},r=>{
+  const upstream=http.request({host:'127.0.0.1',port,path:strip(req.url),method:req.method,headers,timeout:req.url.startsWith('/mp/socket.io')?35000:7500},r=>{
     if(res.headersSent)return r.resume();
     res.writeHead(r.statusCode||502,{...r.headers,'x-catoshi-service':'multiplayer'});
     r.pipe(res);
