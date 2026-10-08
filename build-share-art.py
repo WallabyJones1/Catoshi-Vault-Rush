@@ -1,7 +1,7 @@
 from PIL import Image,ImageDraw,ImageFont
 from pathlib import Path
-import struct,zlib
-W,H=1200,1782
+import struct,zlib,json
+W,H=1200,2214
 im=Image.new('RGBA',(W,H),'#0a0908');d=ImageDraw.Draw(im)
 font='/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf'
 for y in range(630):
@@ -12,16 +12,21 @@ d.polygon([(0,560),(220,510),(490,590),(760,520),(1000,580),(1200,530),(1200,630
 d.rounded_rectangle((52,45,76,88),radius=7,fill='#f26b35')
 d.text((96,42),'CATOSHI / VAULT RUSH',font=ImageFont.truetype(font,32),fill='#f2efe9')
 d.line((60,114,1140,114),fill='#57402c',width=2)
-d.text((60,550),'CAN YOU BEAT IT?',font=ImageFont.truetype(font,24),fill='#e8a13a')
-d.text((60,588),'CATOSHIRUSH.FUN',font=ImageFont.truetype(font,16),fill='#8d8880')
+d.line((60,548,1140,548),fill='#57402c',width=1)
+d.text((60,579),'CATOSHIRUSH.FUN',font=ImageFont.truetype(font,20),fill='#8d8880')
 sheet=Image.open('catoshi-clean-actions.png').convert('RGBA');hero=sheet.crop((19,104,359,399));hero.thumbnail((390,340),Image.Resampling.LANCZOS)
 im.alpha_composite(hero,(790,235))
-# Font atlas below the share picture: ASCII 32..126, 24 columns x 4 rows.
+# Font atlas below the share picture: ASCII 32..126, 9 columns x 11 rows.
 # Embedded pixels mean the production server needs no fonts/native packages.
 f=ImageFont.truetype(font,96)
+chars=[chr(code) for code in range(32,127)]
+metrics={'size':96,'advance':{c:f.getlength(c) for c in chars},
+         'kern':{a+b:f.getlength(a+b)-f.getlength(a)-f.getlength(b) for a in chars for b in chars
+                 if abs(f.getlength(a+b)-f.getlength(a)-f.getlength(b))>.01}}
+Path('share-font-v2.json').write_text(json.dumps(metrics,separators=(',',':')))
 for code in range(32,127):
- idx=code-32;x=(idx%12)*100;y=630+(idx//12)*144
- d.rectangle((x,y,x+99,y+143),fill=(0,0,0,0));d.text((x+1,y+3),chr(code),font=f,fill='white',stroke_width=0)
+ idx=code-32;x=(idx%9)*128;y=630+(idx//9)*144
+ d.rectangle((x,y,x+127,y+143),fill=(0,0,0,0));d.text((x+1,y+3),chr(code),font=f,fill='white',stroke_width=0)
 def chunk(k,v):return struct.pack('>I',len(v))+k+v+struct.pack('>I',zlib.crc32(k+v)&0xffffffff)
 pixels=im.tobytes();scan=b''.join(b'\0'+pixels[y*W*4:(y+1)*W*4] for y in range(H))
 png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',W,H,8,6,0,0,0))+chunk(b'IDAT',zlib.compress(scan,9))+chunk(b'IEND',b'')

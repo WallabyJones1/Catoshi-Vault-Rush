@@ -52,14 +52,21 @@ function shareUI(native=true){
  const calls=[],downloads=[];const src=fs.readFileSync('online.js','utf8'),a=src.indexOf('  let shareGeneration='),b=src.indexOf('  async function board()',a);
  const context={document:{getElementById:el},location:{origin:'https://game.example',protocol:'https:'},URL:Object.assign(class extends URL{},{createObjectURL:()=> 'blob:picture',revokeObjectURL(){}}),URLSearchParams,File,Image:class{},fetch:async route=>{downloads.push(route);return {ok:true,blob:async()=>new Blob(['image'],{type:'image/png'})};},navigator:{clipboard:{writeText:async text=>calls.push({copy:text})},...(native?{canShare:()=>true,share:async data=>calls.push(data)}:{})}};
  vm.runInNewContext('const $=id=>document.getElementById(id);'+src.slice(a,b)+';globalThis.renderShare=share;',context);
- const run={mode:'trial',trial:{id:1,name:'DUNE DASH'},finishTime:11.399,score:0,player:{x:8500}},result={run:{timeMs:11399},url:'https://game.example/trial-score/00000000-0000-0000-0000-000000000001'};
+ const run={mode:'trial',trial:{id:1,name:'DUNE DASH'},finishTime:11.399,score:0,player:{x:8500}},result={run:{timeMs:11399},url:'https://old-production.up.railway.app/trial-score/00000000-0000-0000-0000-000000000001'};
  return {elements,el,calls,downloads,context,run,result};
 }
 test('share prepares a picture before a user gesture, keeps copy concise and falls back to X plus save',async()=>{
  const h=shareUI();h.context.renderShare(h.run,h.result);await new Promise(resolve=>setImmediate(resolve));
- assert.equal(h.downloads[0],'/trial-score/00000000-0000-0000-0000-000000000001.png');assert(!h.el('save-score-picture').hidden);assert(!h.el('score-picture').hidden);let prevented=false;
- await h.el('share-x').onclick({preventDefault(){prevented=true;}});assert(prevented);assert.equal(h.calls[0].files[0].type,'image/png');assert(h.calls[0].text.startsWith('11.399s on DUNE DASH. Your turn.\nhttps://'));assert(!/checked|verification|#/.test(h.calls[0].text));
+ assert.equal(h.downloads[0],'/trial-score/00000000-0000-0000-0000-000000000001.png?v=2');assert(!h.el('save-score-picture').hidden);assert(!h.el('score-picture').hidden);let prevented=false;
+ await h.el('share-x').onclick({preventDefault(){prevented=true;}});assert(prevented);assert.equal(h.calls[0].files[0].type,'image/png');assert.equal(h.calls[0].text,'11.399s on DUNE DASH. Can you beat it?\nhttps://game.example/?trial=1');assert(!/checked|verification|#|railway|trial-score|00000000/.test(h.calls[0].text));
+ assert.equal(h.el('share-x').textContent,'POST TO X');
  await h.el('copy-score').onclick();assert.equal(h.calls[1].copy,h.calls[0].text);
  const fallback=shareUI(false);fallback.context.renderShare(fallback.run,fallback.result);await new Promise(resolve=>setImmediate(resolve));await fallback.el('share-x').onclick({preventDefault(){throw Error('must allow X intent');}});
  assert(fallback.el('share-x').href.startsWith('https://x.com/intent/tweet?'));assert.match(fallback.el('share-status').textContent,/attach/);
+});
+test('a picture still loading never sends a pictureless native share',async()=>{
+ const h=shareUI();let done;h.context.fetch=()=>new Promise(resolve=>{done=resolve;});h.context.renderShare(h.run,h.result);let prevented=false;
+ await h.el('share-x').onclick({preventDefault(){prevented=true;}});assert(prevented);assert.equal(h.calls.length,0);assert.match(h.el('share-status').textContent,/Preparing/);
+ done({ok:true,blob:async()=>new Blob(['image'],{type:'image/png'})});await new Promise(resolve=>setImmediate(resolve));assert.equal(h.el('share-status').textContent,'');
+ await h.el('share-x').onclick({preventDefault(){}});assert.equal(h.calls.length,1);assert(h.calls[0].files.length===1);
 });

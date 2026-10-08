@@ -349,7 +349,7 @@ function createApp(config,options={}) {
           res.writeHead(200,{'Content-Type':'image/png','Content-Length':content.length,'Cache-Control':'public, max-age=300'});
           res.end(req.method==='HEAD'?undefined:content);return;
         }
-        const origin=shareOrigin(req),link=origin+'/'+share[1]+'/'+record.id,image=link+'.png';
+        const origin=shareOrigin(req),link=origin+'/'+share[1]+'/'+record.id,image=link+'.png?v=2';
         const title=escapeHtml(trial?`${record.name} · ${(record.time_ms/1000).toFixed(3)}s · ${course.name}`:`${record.name} · ${record.score.toLocaleString()} points · Catoshi Vault Rush`);
         const description=escapeHtml(trial?'Chase this line in Catoshi Vault Rush.':`${record.distance}m in Catoshi Vault Rush. Can you beat it?`);
         const meta=`<head><base href="/"><link rel="canonical" href="${escapeHtml(link)}"><meta property="og:type" content="website"><meta property="og:site_name" content="Catoshi Vault Rush"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${escapeHtml(link)}"><meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${title}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${escapeHtml(image)}"><meta name="twitter:image:alt" content="${title}">`;

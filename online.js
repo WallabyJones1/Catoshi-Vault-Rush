@@ -133,16 +133,21 @@
     const generation=++shareGeneration,checked=result?.run,trial=run.mode==='trial';
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
     const seconds=((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3);
-    const text=trial?`${seconds}s on ${run.trial.name}. Your turn.`:`${score.toLocaleString()} points. ${distance}m. Your turn.`;
-    let url=result?.url||((location.protocol==='https:'||location.protocol==='http:')?location.origin+'/'+(trial?'?trial='+run.trial.id:''):'');
+    const text=trial?`${seconds}s on ${run.trial.name}. Can you beat it?`:`${score.toLocaleString()} points in Catoshi Vault Rush. Can you beat it?`;
+    // The attached picture contains the result. The caption links directly to
+    // the playable course on the host the player is actually using.
+    let url=(location.protocol==='https:'||location.protocol==='http:')?location.origin+'/'+(trial?'?trial='+run.trial.id:''):'';
     try{if(!['https:','http:'].includes(new URL(url).protocol))url='';}catch{url='';}
     const message=text+(url?'\n'+url:''),link=$('share-x'),save=$('save-score-picture'),preview=$('score-picture');
     link.href='https://x.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});link.hidden=false;
-    link.textContent='SHARE SCORE ↗';link.onclick=null;
+    link.textContent='POST TO X';link.onclick=null;
     if(shareObjectUrl){URL.revokeObjectURL(shareObjectUrl);shareObjectUrl=null;}
     if(save)save.hidden=true;if(preview)preview.hidden=true;
-    let file=null;
+    let file=null,pictureFailed=false;
     link.onclick=async event=>{
+      if(!file&&!pictureFailed&&navigator.share&&navigator.canShare){
+        event.preventDefault();$('share-status').textContent='Preparing your picture… Tap again in a moment.';return;
+      }
       if(!file||!navigator.share||!navigator.canShare?.({files:[file]})){
         $('share-status').textContent='Save the picture to attach it in X.';return;
       }
@@ -157,28 +162,29 @@
     // Prepare before the click: iOS sharing requires a fresh user gesture.
     (async()=>{
       let blob;
-      if(checked&&/\/(?:score|trial-score)\/[0-9a-f-]{36}$/.test(new URL(url).pathname)){
-        const response=await fetch(new URL(url).pathname+'.png',{credentials:'omit'});
+      let recordPath='';try{recordPath=new URL(result?.url).pathname;}catch{}
+      if(checked&&/\/(?:score|trial-score)\/[0-9a-f-]{36}$/.test(recordPath)){
+        const response=await fetch(recordPath+'.png?v=2',{credentials:'omit'});
         if(!response.ok)throw Error('Picture unavailable');blob=await response.blob();
         if(blob.type!=='image/png')throw Error('Picture unavailable');
       }else{
         const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=630;
         const ctx=canvas.getContext('2d');if(!ctx)return;
-        const art=new Image();await new Promise((resolve,reject)=>{art.onload=resolve;art.onerror=reject;art.src='/share-art-v1.png';});
+        const art=new Image();await new Promise((resolve,reject)=>{art.onload=resolve;art.onerror=reject;art.src='/share-art-v1.png?v=2';});
         ctx.drawImage(art,0,0,1200,630,0,0,1200,630);
         const write=(value,x,y,size,color)=>{ctx.font=`700 ${size}px "Chakra Petch",sans-serif`;ctx.fillStyle=color;ctx.fillText(String(value),x,y,710);};
-        write(trial?'SPEED TRIAL '+run.trial.id:'VAULT RUN',60,178,26,'#f26b35');
-        write(($('holder-name')?.value||'CATOSHI').slice(0,20),60,232,36,'#f2efe9');
-        write(trial?seconds+'s':score.toLocaleString(),60,360,98,'#f26b35');
-        write(trial?run.trial.name:'POINTS',60,420,30,'#f2efe9');
-        write(trial?'TIME PENDING':distance+'m / SCORE PENDING',60,477,23,'#8d8880');
+        write(trial?run.trial.name:'VAULT RUN',60,190,34,'#f2efe9');
+        write(trial?seconds+'s':score.toLocaleString(),60,350,110,'#f26b35');
+        write(trial?'SPEED TRIAL '+String(run.trial.id).padStart(2,'0'):distance+'m / POINTS',60,420,24,'#8d8880');
+        write(($('holder-name')?.value||'CATOSHI').slice(0,20).toUpperCase(),60,492,32,'#f2efe9');
         blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
       }
       if(!blob||generation!==shareGeneration)return;
       file=new File([blob],'catoshi-score.png',{type:'image/png'});shareObjectUrl=URL.createObjectURL(blob);
+      $('share-status').textContent='';
       if(save){save.href=shareObjectUrl;save.download='catoshi-score.png';save.hidden=false;}
       if(preview){preview.src=shareObjectUrl;preview.hidden=false;}
-    })().catch(()=>{if(generation===shareGeneration)$('share-status').textContent='Picture unavailable. You can still share your score link.';});
+    })().catch(()=>{pictureFailed=true;if(generation===shareGeneration)$('share-status').textContent='Picture unavailable. You can still share your score link.';});
   }
   async function board(){
     const generation=++boardGeneration,round=boardRound;
