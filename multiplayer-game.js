@@ -8,7 +8,7 @@
   const screens=Array.from(document.querySelectorAll('.screen'));
   const canvas=$('game'),shell=canvas.parentElement,ctx=canvas.getContext('2d');
   const STEP=1/60;
-  let run=null,renderer=null,prediction=null,remotes=null,localRace=null,lastSnapshotAt=0,connected=true,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,hudTimer=0,inputPointer=null,keyHeld=false,startId=0;
+  let wasDrafting=false,run=null,renderer=null,prediction=null,remotes=null,localRace=null,lastSnapshotAt=0,connected=true,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,hudTimer=0,inputPointer=null,keyHeld=false,startId=0;
 
   function show(id){screens.forEach(screen=>screen.classList.toggle('active',screen.id===id));}
   function setStatus(message,kind=''){window.RushMultiplayer?.setStatus?.(message,kind);}
@@ -37,7 +37,10 @@
   function handleLocalEvents(){
     if(!run)return;for(const event of run.drainEvents()){
       renderer.handle(event);sound.effect(event);
-      if(event.type==='trick'){ $('trick').textContent=event.text;if(event.points){const pts=document.createElement('small');pts.textContent='+'+event.points;$('trick').appendChild(pts);}$('trick').classList.add('visible');trickTime=1.5; }
+      if(event.type==='trick'){ $('trick').textContent=event.text;if(event.points){const pts=document.createElement('small');pts.textContent='+'+event.points;$('trick').appendChild(pts);}$('trick').classList.toggle('bad',Boolean(event.bad));$('trick').classList.add('visible');trickTime=event.bad?1.1:1.5;continue; }
+      $('trick').classList.remove('bad');
+      if(event.type==='balloon'&&!event.slipped){ $('trick').textContent=event.kind==='storm'?'HEADWIND BALLOON':'TAILWIND BALLOON';$('trick').classList.toggle('bad',event.kind==='storm');$('trick').classList.add('visible');trickTime=.7; }
+      else if(event.type==='mud'){ $('trick').textContent='BOG · JUMP THE NEXT ONE';$('trick').classList.add('bad','visible');trickTime=.9; }
       else if(event.type==='shot'){ $('trick').textContent='COIN SHOT · 3.5s RELOAD';$('trick').classList.add('visible');trickTime=.65; }
       else if(event.type==='boost-ready'){$('trick').textContent='BOOST READY';$('trick').classList.add('visible');trickTime=.7;}
       else if(event.type==='rush'){ $('trick').textContent='BOOST ACTIVE';$('trick').classList.add('visible');trickTime=1; }
@@ -54,6 +57,7 @@
         else prediction.step();handleLocalEvents();accumulator-=STEP;
         if(localRace?.finished){window.RushMultiplayer?.localFinished?.(localRace.result());return;}
       }$('countdown').textContent=run.finished?'FINISH!':'';}else{accumulator=0;$('countdown').textContent='RECONNECTING';}
+      const drafting=Boolean(run?.player?.draft>0&&run.player.grounded);if(drafting&&!wasDrafting&&trickTime<=0){$('trick').textContent='SLIPSTREAM';$('trick').classList.remove('bad');$('trick').classList.add('visible');trickTime=.8;}wasDrafting=drafting;
       trickTime-=dt;if(trickTime<=0)$('trick').classList.remove('visible');hudTimer-=dt;if(hudTimer<=0){updateHud();hudTimer=.1;}
     }
     const alpha=phase==='running'?accumulator/STEP:1;

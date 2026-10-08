@@ -136,7 +136,11 @@
     }
     remoteRacers(run,left,right,portrait){
       const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=r.grounded||!Number.isFinite(r.y)?run.terrain(r.x):r.y,angle=r.grounded?run.slope(r.x):r.angle||0,frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(angle);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
-      for(const q of this.projectiles){if(q.x<left-30||q.x>right+30)continue;ctx.save();ctx.translate(q.x,q.y);ctx.rotate(q.angle||0);ctx.globalAlpha=.95;ctx.drawImage(this.images.coin,-9,-9,18,18);ctx.restore();}
+      for(const q of this.projectiles){if(q.x<left-60||q.x>right+30)continue;
+        // A 150 km/h coin leaves a short speed streak in its owner's colour.
+        ctx.save();ctx.translate(q.x,q.y);ctx.globalAlpha=.45;ctx.strokeStyle=q.color||'#f4c542';ctx.lineWidth=3;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-54,0);ctx.lineTo(-10,0);ctx.stroke();
+        ctx.globalAlpha=.25;ctx.beginPath();ctx.moveTo(-80,0);ctx.lineTo(-54,0);ctx.stroke();
+        ctx.rotate(q.angle||0);ctx.globalAlpha=.95;ctx.drawImage(this.images.coin,-9,-9,18,18);ctx.restore();}
     }
     burst(x, y, color, amount, strength) {
       for (let i = 0; i < amount; i++) this.particles.push({
@@ -475,9 +479,32 @@
         if (r.end < left || r.x > right) continue;
         // The ramp is already part of the real ground, including its smooth
         // recovery. Highlight only the takeoff rather than drawing a wedge.
-        ctx.beginPath();ctx.moveTo(r.end-90,run.terrain(r.end-90));
-        for(let x=r.end-84;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
-        ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(61,220,84,.65)';ctx.lineWidth=2;ctx.stroke();
+        const mega=r.kind==='mega',lip=mega?150:90;
+        ctx.beginPath();ctx.moveTo(r.end-lip,run.terrain(r.end-lip));
+        for(let x=r.end-lip+6;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
+        ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle=mega?'rgba(244,197,66,.9)':'rgba(61,220,84,.65)';ctx.lineWidth=mega?3.5:2;ctx.stroke();
+        if(mega){
+          // Pop marker: tap at the lip to reach the balloons above.
+          const y=run.terrain(r.end),pulse=.65+.35*Math.sin(this.clock*6);
+          ctx.save();ctx.translate(r.end-18,y-30);ctx.strokeStyle='rgba(244,197,66,'+pulse+')';ctx.lineWidth=3;ctx.lineCap='round';
+          for(let i=0;i<2;i++){ctx.beginPath();ctx.moveTo(-9,-i*11+4);ctx.lineTo(0,-i*11-5);ctx.lineTo(9,-i*11+4);ctx.stroke();}
+          ctx.fillStyle='#f4c542';ctx.font='700 11px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('POP',0,-26);ctx.restore();
+        }
+      }
+      for(const m of run.mud||[]){
+        if(m.end<left||m.x>right)continue;
+        // A bog is a dark, wet pool sunk into the sand, with a glossy rim and slow bubbles.
+        const edge=x=>run.terrain(x);
+        ctx.save();ctx.beginPath();ctx.moveTo(m.x,edge(m.x)-1);
+        for(let x=m.x+8;x<m.end;x+=8)ctx.lineTo(x,edge(x)-3);
+        ctx.lineTo(m.end,edge(m.end)-1);
+        for(let x=m.end;x>m.x;x-=8){const u=(x-m.x)/(m.end-m.x);ctx.lineTo(x,edge(x)+8+22*Math.sin(u*Math.PI));}
+        ctx.closePath();ctx.fillStyle='#4a2c18';ctx.fill();
+        ctx.beginPath();ctx.moveTo(m.x+6,edge(m.x+6)-3);for(let x=m.x+14;x<m.end-6;x+=8)ctx.lineTo(x,edge(x)-3);
+        ctx.strokeStyle='rgba(205,150,90,.95)';ctx.lineWidth=3.2;ctx.lineCap='round';ctx.stroke();
+        ctx.fillStyle='rgba(176,128,78,.75)';
+        for(let x=m.x+26;x<m.end-18;x+=46){const k=(this.clock*1.7+x*.031)%1,r=1.5+3*k;ctx.globalAlpha=.85*(1-k);ctx.beginPath();ctx.arc(x,edge(x)-4-k*6,r,0,Math.PI*2);ctx.fill();}
+        ctx.restore();
       }
     }
     rails(run, left, right) {
@@ -494,6 +521,25 @@
         ctx.lineTo(rail.end,rail.endY);
         ctx.strokeStyle='#88704c';ctx.lineWidth=3;ctx.stroke();
         ctx.strokeStyle='rgba(232,161,58,.42)';ctx.lineWidth=1;ctx.stroke();
+      }
+    }
+    skyRoutes(run,left,right) {
+      const ctx=this.ctx;
+      for(const b of run.balloons||[]){
+        if(b.x<left-140||b.x>right+140)continue;
+        const storm=b.kind==='storm',width=170,h=width*381/371,top=b.y+Math.sin(this.clock*1.6+b.x*.01)*3;
+        // Tether to the ground so the balloon reads as part of the course.
+        ctx.save();ctx.strokeStyle='rgba(136,112,76,.5)';ctx.lineWidth=1.5;ctx.setLineDash([6,6]);
+        ctx.beginPath();ctx.moveTo(b.x,top+h-6);ctx.lineTo(b.x+14,run.terrain(b.x+14));ctx.stroke();ctx.restore();
+        ctx.save();ctx.globalAlpha=.18;ctx.fillStyle=storm?'#e03b3b':'#e8a13a';
+        ctx.beginPath();ctx.ellipse(b.x,top+h*.27,width*.6,h*.33,0,0,Math.PI*2);ctx.fill();ctx.restore();
+        this.prop(4,b.x,top+h,width);
+        // Wind chevrons: gold pointing forward = tailwind, red pointing back = headwind.
+        ctx.save();ctx.strokeStyle=storm?'#ff6a4a':'#f4c542';ctx.lineWidth=3.2;ctx.lineCap='round';ctx.lineJoin='round';
+        const cy=top+h*.25,dir=storm?-1:1;
+        for(let i=-1;i<=1;i++){const cx=b.x+i*22;ctx.beginPath();ctx.moveTo(cx-6*dir,cy-9);ctx.lineTo(cx+6*dir,cy);ctx.lineTo(cx-6*dir,cy+9);ctx.stroke();}
+        ctx.fillStyle=storm?'rgba(224,59,59,.9)':'rgba(61,220,84,.9)';ctx.fillRect(b.x-36,top-2,72,4);
+        ctx.restore();
       }
     }
     heart(x,y,size) {
@@ -541,6 +587,7 @@
       ctx.globalAlpha = 1;
       this.rails(run,left,right);
       this.terrain(run,left,right,bottom);
+      this.skyRoutes(run,left,right);
       this.finishLine(run);
       for (const item of run.items) {
         if (item.hit || item.x < left || item.x > right)continue;
@@ -619,6 +666,12 @@
       else if(this.intro>0)frame=6;
       const crash=this.crashPose,age=crash?Math.min(.75,crash.age):0;
       const crashTravel=crash?Math.min(24,crash.speed*.06)*Math.sin(age*Math.PI/.75):0;
+      if(p.draft>0&&p.grounded&&this.intro<=0){
+        // Slipstream: thin wind lines flowing past the tucked-in racer.
+        ctx.save();ctx.strokeStyle='rgba(242,239,233,.35)';ctx.lineWidth=1.2;
+        for(let i=0;i<4;i++){const off=(this.clock*900+i*37)%120,yy=actorY-8-i*9;ctx.beginPath();ctx.moveTo(actorX+40-off,yy);ctx.lineTo(actorX+12-off,yy);ctx.stroke();}
+        ctx.restore();
+      }
       if(p.rush>0){
         // Warm shield and short motion trails, leaving the cat's face readable.
         ctx.save();ctx.strokeStyle='rgba(232,161,58,.65)';ctx.lineWidth=1.3;

@@ -1,6 +1,6 @@
 'use strict';
 const crypto=require('node:crypto');
-const {RaceRun,coinShot,stepCoinShot,COINS_PER_SHOT}=require('./race-engine.js');
+const {RaceRun,coinShot,stepCoinShot,shotHitsRacer,applyPackRules,COINS_PER_SHOT}=require('./race-engine.js');
 const {TRACKS,getTrack}=require('./race-tracks.js');
 
 const TICK_RATE=60,SNAPSHOT_RATE=15,DT=1/TICK_RATE,DISCONNECT_GRACE_MS=20000,REPLAY_HZ=10,MAX_PROJECTILES=64;
@@ -59,7 +59,7 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
     // Every racer's RaceRun owns its ground boosts; leaders cannot consume
     // another player's opportunities. Only coin shots are shared interactions.
     const racers=[...m.players.values()].filter(p=>!p.forfeited&&p.finishMs===null).sort((a,b)=>b.run.player.x-a.run.player.x||a.seat-b.seat);
-    for(const q of m.projectiles){if(!stepCoinShot(m.track,q,DT))continue;for(const p of racers){if(p.session===q.owner||p.run.player.invulnerable>0)continue;const r=p.run.player;if(Math.abs(r.x-q.x)<32&&Math.abs((r.y-20)-q.y)<46){if(p.run.applyHit()){q.life=0;const owner=m.players.get(q.owner);if(owner)owner.run.hits++;io.to('match:'+m.id).emit('race:event',{type:'hit',from:q.seat,to:p.seat,x:r.x,y:r.y});}break;}}}
+    for(const q of m.projectiles){if(!stepCoinShot(m.track,q,DT))continue;for(const p of racers){if(p.session===q.owner||p.run.player.invulnerable>0)continue;const r=p.run.player;if(shotHitsRacer(q,r)){if(p.run.applyHit()){q.life=0;const owner=m.players.get(q.owner);if(owner)owner.run.hits++;io.to('match:'+m.id).emit('race:event',{type:'hit',from:q.seat,to:p.seat,x:r.x,y:r.y});}break;}}}
     m.projectiles=m.projectiles.filter(q=>q.life>0&&q.x<m.track.finishX+800);
   }
   function recordReplay(m){if(m.tick-m.lastReplayTick<Math.floor(TICK_RATE/REPLAY_HZ))return;m.lastReplayTick=m.tick;const s=snapshot(m);m.replay.push({t:Math.round(m.tick/TICK_RATE*1000),boostMask:m.boostMask,players:s.players.map(p=>({seat:p.seat,name:p.name,color:p.color,x:Math.round(p.x),y:Math.round(p.y),angle:Number(p.angle.toFixed(3)),finished:p.finished})),projectiles:s.projectiles.map(q=>({seat:q.seat,color:q.color,x:Math.round(q.x),y:Math.round(q.y)}))});while(m.replay.length>REPLAY_HZ*5)m.replay.shift();}
@@ -78,12 +78,20 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
     for(const p of m.players.values())io.to('session:'+p.session).emit('race:finished',multiplayer.publicMatch(m.id,p.session));
     setTimeout(()=>active.delete(m.id),30000).unref?.();return true;
   }
+  // Slipstream and catch-up are pack rules: they need every racer's position.
+  function packRules(m){applyPackRules([...m.players.values()].filter(p=>!p.forfeited&&p.finishMs===null).map(p=>p.run));}
   function botDrive(m,p){
-    const r=p.run.player,x=r.x;
-    // Look ahead to gaps and obstacles; different seats give bots varied play styles.
+    const run=p.run,r=run.player,x=r.x;
+    if(p.botRelease&&m.tick>=p.botRelease){run.release();p.botRelease=0;}
+    // Look ahead to gaps, ramps and bogs; different seats give bots varied route styles.
     const upcoming=m.track.gaps.find(g=>g.x>=x&&g.x-x<240);
-    if(upcoming&&r.grounded&&!r.held){p.run.press();p.botRelease=m.tick+12+(p.seat%7);}
-    if(p.botRelease&&m.tick>=p.botRelease){p.run.release();p.botRelease=0;}
+    const face=r.grounded?run.ramps.find(q=>x>=q.x&&x<q.end):null;
+    const bog=run.mud.find(b=>b.x-x>40&&b.x-x<200);
+    if(!r.held){
+      if(upcoming&&r.grounded){run.press();p.botRelease=m.tick+12+(p.seat%7);}
+      else if(face&&!r.lipQueued&&(face.end-x)/Math.max(300,r.vx)<.16&&(face.kind==='mega'?(p.seat+face.id)%3!==0:(p.seat*3+face.id)%4===0)){run.press();p.botRelease=m.tick+5;}
+      else if(bog&&r.grounded&&(p.seat+m.tick)%3!==0){run.press();p.botRelease=m.tick+6;}
+    }
     if(p.run.boostCharges&&!r.boost&&m.tick%120===p.seat%120)p.run.activateBoost();
     // Bot shots are deliberately rare; AI should not make free play frustrating.
     if(p.run.coins>=COINS_PER_SHOT&&m.tick%480===p.seat*13%480&&m.projectiles.length<MAX_PROJECTILES){
@@ -96,8 +104,10 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
     for(const p of m.players.values()){
       if(p.forfeited||p.finishMs!==null)continue;
       if(!p.isBot&&!p.connected&&p.disconnectedAt&&t-p.disconnectedAt>DISCONNECT_GRACE_MS){forfeitPlayer(m,p,'DISCONNECTED');continue;}
-      if(p.isBot)botDrive(m,p);p.run.step(DT);p.run.drainEvents();if(p.run.finished)finishPlayer(m,p);
+      if(p.isBot)botDrive(m,p);
     }
+    packRules(m);
+    for(const p of m.players.values()){if(p.forfeited||p.finishMs!==null)continue;p.run.step(DT);p.run.drainEvents();if(p.run.finished)finishPlayer(m,p);}
     sharedInteractions(m);recordReplay(m);m.tick++;
     maybeFinalize(m);
   }
@@ -119,7 +129,7 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
       const rows=multiplayer.matchRows(dbMatch.id),m=createLive(dbMatch,rows);m.startAt=dbMatch.start_at;m.deadline=dbMatch.finish_deadline;
       // Rebuild deterministically from persisted input events to the last persisted server tick.
       const elapsedTick=now()>m.startAt?Math.floor((now()-m.startAt)/1000*TICK_RATE):0;const target=Math.max(0,Math.min(Math.max(dbMatch.server_tick||0,elapsedTick),multiplayer.constants.RACE_SECONDS*TICK_RATE));
-      for(let i=0;i<target;i++){applyRecordedInputs(m);for(const p of m.players.values())if(!p.forfeited&&p.finishMs===null){if(p.isBot)botDrive(m,p);p.run.step(DT);p.run.drainEvents();if(p.run.finished)finishPlayer(m,p);}sharedInteractions(m);m.tick++;}
+      for(let i=0;i<target;i++){applyRecordedInputs(m);for(const p of m.players.values())if(!p.forfeited&&p.finishMs===null&&p.isBot)botDrive(m,p);packRules(m);for(const p of m.players.values())if(!p.forfeited&&p.finishMs===null){p.run.step(DT);p.run.drainEvents();if(p.run.finished)finishPlayer(m,p);}sharedInteractions(m);m.tick++;}
       m.status=now()>=m.startAt?'running':'countdown';
     }
   }

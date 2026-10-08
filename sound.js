@@ -12,7 +12,9 @@
   const clips={burst:'burst',coin:'coin',jump:'jump','flip-start':'flip',flip:'flip',land:'land',crash:'crash',rush:'rush',redRush:'red',heart:'red','cargo-land':'wood',escape:'land',finish:'land'};
   function mediaClip(event){
     if(event.type==='stumble')return event.fatal?null:['metal','wood','stone'].includes(event.material)?event.material:'stone';
-    if(event.type==='trick')return /BACKFLIP/.test(event.text)?'red':event.text==='RUSH BOOST'?'rush':event.text==='CABLE GRIND'?'flip':null;
+    if(event.type==='trick')return /BACKFLIP|SKY FLIP/.test(event.text)?'red':event.text==='RUSH BOOST'?'rush':/CABLE GRIND|POP/.test(event.text)?'flip':null;
+    if(event.type==='balloon')return event.slipped?'stone':'jump';
+    if(event.type==='mud')return 'land';
     return clips[event.type]||null;
   }
   function usesMedia(){return !context||context.state==='closed';}

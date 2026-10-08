@@ -4,7 +4,7 @@ const {HttpError,playerName}=require('./mp-security.cjs');
 const {currentRound,roundWindow}=require('./periods.cjs');
 const {getTrack,publicTracks}=require('./race-tracks.js');
 
-const MIN_PLAYERS=2,MAX_PLAYERS=8,QUEUE_WAIT_MS=12000,QUEUE_STALE_MS=120000,START_DELAY_MS=5000,RACE_SECONDS=110,COUNTED_RACES=30;
+const MIN_PLAYERS=2,MAX_PLAYERS=8,QUEUE_WAIT_MS=12000,QUEUE_STALE_MS=120000,START_DELAY_MS=5000,RACE_SECONDS=150,COUNTED_RACES=30;
 const BASE_POINTS=[25,18,15,12,10,8,6,4];
 const COLORS=['#f4c542','#ff7043','#ef5350','#ec407a','#ab47bc','#7e57c2','#5c6bc0','#42a5f5','#26c6da','#26a69a','#66bb6a','#d4e157','#ffffff','#b0bec5'];
 function playerColor(value){const v=String(value||'').toLowerCase();const found=COLORS.find(c=>c.toLowerCase()===v);return found||COLORS[0];}

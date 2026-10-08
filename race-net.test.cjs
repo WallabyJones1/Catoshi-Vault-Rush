@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {RaceRun,coinShot,stepCoinShot}=require('./race-engine.js');
+const {RaceRun,coinShot,stepCoinShot,shotHitsRacer,SHOT_SPEED}=require('./race-engine.js');
 const {TRACKS,terrainAt,gapAt}=require('./race-tracks.js');
 const {Prediction,RemoteBuffer}=require('./race-net.js');
 test('prediction restores complete physics and replays an unacknowledged jump without duplicating effects',()=>{
@@ -37,12 +37,24 @@ test('remote interpolation smooths movement and takes the shortest rotation acro
   const p=net.sample(166).players[0];assert.ok(p.x>100&&p.x<180);assert.ok(Math.abs(p.angle)>3);
   net.push({tick:99,players:[]},200);assert.equal(net.frames.length,2);
 });
-test('coin shots spin and bounce just above every sand surface, even when fired in midair',()=>{
-  for(const track of TRACKS){const run=new RaceRun(track.id);run.player.y-=500;
-    const q=coinShot(run);assert.equal(q.y,terrainAt(track,q.x)-8);let bounced=false;
-    for(let i=0;i<120;i++){if(!stepCoinShot(track,q,1/60))break;const clearance=terrainAt(track,q.x)-q.y;assert.ok(clearance>=8&&clearance<=26);assert.ok(!gapAt(track,q.x));bounced ||=clearance>15;}
-    assert.ok(bounced);assert.notEqual(q.angle,0);
+test('coin shots leave the front of the racer at 150 km/h, from the ground or mid-air, then roll on the sand',()=>{
+  assert.equal(SHOT_SPEED,1500,'150 km/h on the HUD (speed x 0.1)');
+  for(const track of TRACKS){
+    // Mid-air: the coin starts at the racer's chest, ahead of them, well above the sand.
+    const run=new RaceRun(track.id),x=track.sections.find(s=>'RP'.includes(s.kind)).x+500;Object.assign(run.player,{x,y:terrainAt(track,x)-360,grounded:false,vx:1000,vy:-200,angle:0});
+    const q=coinShot(run);assert(q.x>run.player.x+15&&q.x<run.player.x+45,'from the front');assert(Math.abs(q.y-(run.player.y-20))<25,'at body height');
+    assert(terrainAt(track,q.x)-q.y>250,'fired from the air, not snapped to the ground');assert.equal(q.vx,SHOT_SPEED);
+    let rolled=false,bounced=false,frames=0;
+    for(let i=0;i<144;i++){if(!stepCoinShot(track,q,1/60))break;frames++;const clearance=terrainAt(track,q.x)-q.y;if(q.mode==='roll'){rolled=true;assert.ok(clearance>=8&&clearance<=26);bounced ||=clearance>15;}}
+    assert.ok(rolled,track.id+' air shot lands and rolls');assert.ok(bounced);assert.notEqual(q.angle,0);
+    // On the ground: it leaves just ahead of the racer and hugs the sand.
+    const g=new RaceRun(track.id);g.player.x=2000;g.player.y=g.terrain(2000);const s=coinShot(g);
+    assert(s.x>g.player.x&&terrainAt(track,s.x)-s.y<40);
   }
+});
+test('a 150 km/h coin hits a racer it passes between ticks',()=>{
+  const q={x:1000,y:180,previousX:975,previousY:180};assert(shotHitsRacer(q,{x:990,y:200}));assert(!shotHitsRacer(q,{x:1200,y:200}));
+  const fast={x:1050,y:180,previousX:950,previousY:180};assert(shotHitsRacer(fast,{x:1000,y:200}),'swept test cannot tunnel');
 });
 test('eight opponents move continuously through jitter, lost updates and short stalls',()=>{
   const net=new RemoteBuffer(),packets=[];let previous=null,maxStep=0;

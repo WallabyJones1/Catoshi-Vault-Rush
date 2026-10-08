@@ -59,6 +59,6 @@ test('eight real socket sessions can jump, release, boost and finish the same li
     }
     assert(m.finalized);assert([...m.players.values()].every(p=>p.finishMs!==null&&!p.forfeited));
     assert(snapshots.every(s=>s.players.length===8&&s.players.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))));
-    const health=await(await fetch(origin+'/health')).json();assert.equal(health.build,'downhill-22');
+    const health=await(await fetch(origin+'/health')).json();assert.equal(health.build,'skyroutes-23');
   }finally{clients.forEach(s=>s.disconnect());await app.close();}
 });
