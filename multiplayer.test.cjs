@@ -14,7 +14,8 @@ test('weekly, last-week, lifetime and track-record leaderboards count verified r
    const all=mp.lifetimeLeaderboard('a');assert.equal(all.entries[0].lifetimePoints,week.entries[0].weeklyPoints);
    const track=mp.trackLeaderboard('summit-smash','a');assert.equal(track.entries[0].bestMs,42000);assert.equal(track.entries[0].you,true);
    assert.equal(mp.trackLeaderboard('frozen-rush').entries.length,0);
-   assert(mp.replay(mp.publicMatch(m.id,'a').replayId));
+   const stored=mp.replay(mp.publicMatch(m.id,'a').replayId);assert(stored);
+   assert.deepEqual(stored.results.map(r=>[r.name,r.placement]),[['Speedy Cat',1],['Chill Cat',2]],'replays carry the final standings');
    assert.throws(()=>mp.trackLeaderboard('unknown-track'),/Unknown track/);
    time+=7*86400000;const next=mp.leaderboard();assert.equal(next.entries.length,0);assert.equal(mp.lifetimeLeaderboard().entries.length,2);
  }finally{db.close();}

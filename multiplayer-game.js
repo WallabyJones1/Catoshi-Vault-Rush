@@ -53,7 +53,7 @@
       countdown-=dt;$('countdown').textContent=countdown>.8?'READY':countdown>.15?'GO!':'';if(countdown<=0){phase='running';$('countdown').textContent='';accumulator=0;}
     }else if(phase==='running'){
       if(localRace||connected&&now-lastSnapshotAt<1500){accumulator+=dt;while(accumulator>=STEP&&phase==='running'){
-        if(localRace){localRace.step();if(localRace.tick%12===0)window.RushMultiplayer?.localSnapshot?.(localRace.snapshot());}
+        if(localRace){localRace.step();for(const e of localRace.drainEvents())multiplayerEvent(e);if(localRace.tick%12===0)window.RushMultiplayer?.localSnapshot?.(localRace.snapshot());}
         else prediction.step();handleLocalEvents();accumulator-=STEP;
         if(localRace?.finished){window.RushMultiplayer?.localFinished?.(localRace.result());return;}
       }$('countdown').textContent=run.finished?'FINISH!':'';}else{accumulator=0;$('countdown').textContent='RECONNECTING';}
@@ -78,7 +78,12 @@
   }
   function multiplayerEvent(event){
     if(!renderer||!run)return;
-    if(event.type==='hit'&&event.to===ticket?.seat){renderer.handle({type:'stumble',x:run.player.x,y:run.player.y,heavy:false,material:'metal',kind:'coin-shot',lifeLost:false});sound.effect({type:'metal'});$('trick').textContent='HIT BY COIN SHOT';$('trick').classList.add('visible');trickTime=.9;}
+    if(event.type==='hit'&&event.to===ticket?.seat){if(!localRace){renderer.handle({type:'stumble',x:run.player.x,y:run.player.y,heavy:false,material:'metal',kind:'coin-shot',lifeLost:false});sound.effect({type:'metal'});}$('trick').textContent='HIT BY COIN SHOT';$('trick').classList.add('bad','visible');trickTime=.9;}
+    else if(event.type==='hit'&&event.from===ticket?.seat){
+      // Tell the shooter their coin landed: a gold burst on the target and a callout.
+      renderer.burst(event.x,event.y-20,'#f4c542',16,170);renderer.burst(event.x,event.y-20,'#f2efe9',6,120);sound.effect({type:'coin'});
+      $('trick').textContent='DIRECT HIT';$('trick').classList.remove('bad');$('trick').classList.add('visible');trickTime=1;
+    }
     else if(event.type==='boost'&&event.seat===ticket?.seat){$('trick').textContent='BOOST READY · PRESS B';$('trick').classList.add('visible');trickTime=1;}
     else if(event.type==='finish'&&event.seat===ticket?.seat){$('trick').textContent='FINISH!';$('trick').classList.add('visible');trickTime=1.2;}
   }

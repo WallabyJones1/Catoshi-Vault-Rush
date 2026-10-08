@@ -13,8 +13,10 @@
   const MAX_BOOST_CHARGES=3;
   const MAX_SPEED=1180;
   const BOOST_SPEED=1450;
-  // Coin shots leave the racer at 150 km/h on the HUD (speed × 0.1).
-  const SHOT_SPEED=1500,SHOT_GRAVITY=900,SHOT_LIFE=2.4;
+  // Coin shots leave the racer at 300 km/h on the HUD (speed × 0.1): fast enough
+  // to close on a boosted leader. A light lock-on steers the coin's height toward
+  // the nearest racer ahead (like a guided shell) but turns slowly enough to miss.
+  const SHOT_SPEED=3000,SHOT_GRAVITY=900,SHOT_LIFE=1.6,SHOT_RANGE=3400,SHOT_GUIDE=2600;
   const G=PHYSICS.gravity;
   // Ramp lip timing: press within this many seconds before the lip for a perfect pop,
   // or within LATE_POP seconds after leaving it for a weaker late pop.
@@ -219,18 +221,31 @@
     applySnapshot(s){if(!s)return;const p=this.player;this.previousPlayer={...p};for(const k of ['x','y','speed','vx','vy','angle','grounded','held','heldTime','airborne','spin','turns','coyote','buffer','flipStarted','timingJump','invulnerable','boost','stagger','respawnFreeze','lipQueued','lipWindow','lipRamp','popped','skyLock','draft','inMud'])if(s[k]!==undefined)p[k]=s[k];for(const k of ['coins','coinsCollected','boostCharges','shotCooldown','shots','hits','respawns','balloonBounces','badLandings','finished','score','catchup'])if(s[k]!==undefined)this[k]=s[k];if(Number.isFinite(s.rawScore))this.score=s.rawScore;if(Array.isArray(s.coinHits)){const hit=new Set(s.coinHits);for(const i of this.items)if(i.type==='coin')i.hit=hit.has(i.id);}if(Array.isArray(s.boostHits)){const hit=new Set(s.boostHits);for(const i of this.items)if(i.type==='boost'&&!i.shared)i.hit=hit.has(i.id);}}
   }
   // A coin leaves the front of the racer wherever they are — on the ground,
-  // mid-jump or bouncing across balloons — at 150 km/h, aimed along their travel.
+  // mid-jump or bouncing across balloons — aimed along their travel.
   function coinShot(run,identity={}){
     const p=run.player,grounded=p.grounded;
     const travel=grounded?run.slope(p.x):Math.atan2(p.vy,Math.max(200,p.vx));
     const aim=clamp(travel,-.35,.35);
     const body=grounded?run.slope(p.x):clamp(travel,-.6,.6);
     const x=p.x+30*Math.cos(body)+20*Math.sin(body),y=p.y+30*Math.sin(body)-20*Math.cos(body);
-    return{...identity,x,y,previousX:x,previousY:y,vx:SHOT_SPEED,vy:grounded?SHOT_SPEED*Math.sin(aim)*.4:SHOT_SPEED*Math.tan(aim),mode:'air',angle:0,bounce:0,life:SHOT_LIFE};
+    return{...identity,x,y,previousX:x,previousY:y,vx:SHOT_SPEED,vy:grounded?0:SHOT_SPEED*Math.tan(aim)*.5,mode:'air',angle:0,bounce:0,life:SHOT_LIFE};
   }
-  function stepCoinShot(track,q,dt){
+  // The nearest unfinished racer ahead within range. racers: [{seat,run}].
+  function pickShotTarget(shooter,racers){
+    let best=null;
+    for(const r of racers){if(!r||r.run===shooter||r.run.finished||r.run.dead)continue;const dx=r.run.player.x-shooter.player.x;if(dx>0&&dx<SHOT_RANGE&&(!best||dx<best.dx))best={seat:r.seat,dx};}
+    return best?best.seat:null;
+  }
+  function stepCoinShot(track,q,dt,target){
     q.previousX=q.x;q.previousY=q.y;q.life-=dt;q.x+=q.vx*dt;q.angle=(q.angle+q.vx/8*dt)%TAU;
+    const guide=target&&target.x>q.x-10&&target.x-q.x<SHOT_RANGE;
+    if(guide&&q.mode==='roll'&&target.y-22<q.y-60){q.mode='air';q.vy=0;}
     if(q.mode!=='roll'){
+      if(guide){
+        // Steer toward the height that meets the target's body when we reach them.
+        const t=Math.max(.05,(target.x-q.x)/q.vx),want=(target.y-22-q.y)/t-SHOT_GRAVITY*t*.5;
+        q.vy+=clamp(want-q.vy,-SHOT_GUIDE*dt,SHOT_GUIDE*dt);
+      }
       q.vy=(q.vy||0)+SHOT_GRAVITY*dt;q.y+=q.vy*dt;
       const ground=terrainAt(track,q.x);
       if(!gapAt(track,q.x)&&q.y>=ground-8){q.mode='roll';q.vy=0;q.bounce=0;q.y=ground-8;}
@@ -253,5 +268,5 @@
     const leaderX=Math.max(...live.map(r=>r.player.x));
     for(const r of live){r.setCatchup(catchupFor(leaderX,r.player.x));if(live.some(o=>o!==r&&draftingBehind(r.player,o.player)))r.setDraft(true);}
   }
-  return {RaceRun,coinShot,stepCoinShot,shotHitsRacer,applyPackRules,draftingBehind,catchupFor,COINS_PER_SHOT,SHOT_COOLDOWN,SHOT_SPEED,MAX_BOOST_CHARGES,MAX_SPEED,BOOST_SPEED,VERSION:'race-web-10-skyroutes'};
+  return {RaceRun,coinShot,stepCoinShot,pickShotTarget,shotHitsRacer,SHOT_RANGE,applyPackRules,draftingBehind,catchupFor,COINS_PER_SHOT,SHOT_COOLDOWN,SHOT_SPEED,MAX_BOOST_CHARGES,MAX_SPEED,BOOST_SPEED,VERSION:'race-web-11-polish'};
 });

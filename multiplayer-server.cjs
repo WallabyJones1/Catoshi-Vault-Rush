@@ -52,7 +52,7 @@ function createApp({database=process.env.MP_DATABASE_PATH||process.env.DATABASE_
     try{
       if(!['GET','HEAD'].includes(req.method))throw new HttpError(405,'Method not allowed.');
       const url=new URL(req.url,'http://localhost');
-      if(url.pathname==='/health'){db.prepare('SELECT 1').get();send(res,200,{ok:true,service:'catoshi-multiplayer',version:'5.0.0',build:'skyroutes-23',raceEngine:require('./race-engine.js').VERSION,realtime:!!live});return;}
+      if(url.pathname==='/health'){db.prepare('SELECT 1').get();send(res,200,{ok:true,service:'catoshi-multiplayer',version:'5.0.0',build:'polish-24',raceEngine:require('./race-engine.js').VERSION,realtime:!!live});return;}
       if(url.pathname.startsWith('/api/')){
         const s=ensureSession(req,res);
         throttle(req,s.id);

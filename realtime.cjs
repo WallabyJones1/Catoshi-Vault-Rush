@@ -1,9 +1,9 @@
 'use strict';
 const crypto=require('node:crypto');
-const {RaceRun,coinShot,stepCoinShot,shotHitsRacer,applyPackRules,COINS_PER_SHOT}=require('./race-engine.js');
+const {RaceRun,coinShot,stepCoinShot,pickShotTarget,shotHitsRacer,applyPackRules,COINS_PER_SHOT}=require('./race-engine.js');
 const {TRACKS,getTrack}=require('./race-tracks.js');
 
-const TICK_RATE=60,SNAPSHOT_RATE=15,DT=1/TICK_RATE,DISCONNECT_GRACE_MS=20000,REPLAY_HZ=10,MAX_PROJECTILES=64;
+const TICK_RATE=60,SNAPSHOT_RATE=15,DT=1/TICK_RATE,DISCONNECT_GRACE_MS=20000,REPLAY_HZ=20,MAX_PROJECTILES=64;
 
 function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allowRequest}){
   // Delayed require keeps the normal test suite usable before npm install.
@@ -51,18 +51,20 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
   function applyInput(p,m,code,restoring=false){
     if(p.forfeited||p.finishMs!==null)return;
     if(code===1)p.run.press();else if(code===0)p.run.release();else if(code===3){if(p.run.activateBoost()&&!restoring)io.to('match:'+m.id).emit('race:event',{type:'boost-used',seat:p.seat});}else if(code===2){
-      if(m.projectiles.length<MAX_PROJECTILES&&p.run.spendShot()){const r=p.run.player;m.projectiles.push(coinShot(p.run,{id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color}));if(!restoring)io.to('match:'+m.id).emit('race:event',{type:'shot',seat:p.seat,x:r.x,y:r.y});}
+      if(m.projectiles.length<MAX_PROJECTILES&&p.run.spendShot()){const r=p.run.player;m.projectiles.push(coinShot(p.run,{id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color,targetSeat:shotTarget(m,p)}));if(!restoring)io.to('match:'+m.id).emit('race:event',{type:'shot',seat:p.seat,x:r.x,y:r.y});}
     }
   }
   function applyRecordedInputs(m){for(const p of m.players.values()){while(p.inputCursor<p.inputs.length&&p.inputs[p.inputCursor][0]<=m.tick){const [tick,code]=p.inputs[p.inputCursor++];if(tick===m.tick)applyInput(p,m,code,true);}}}
+  function liveRacers(m){return[...m.players.values()].filter(p=>!p.forfeited&&p.finishMs===null);}
+  function shotTarget(m,p){return pickShotTarget(p.run,liveRacers(m));}
   function sharedInteractions(m){
     // Every racer's RaceRun owns its ground boosts; leaders cannot consume
     // another player's opportunities. Only coin shots are shared interactions.
     const racers=[...m.players.values()].filter(p=>!p.forfeited&&p.finishMs===null).sort((a,b)=>b.run.player.x-a.run.player.x||a.seat-b.seat);
-    for(const q of m.projectiles){if(!stepCoinShot(m.track,q,DT))continue;for(const p of racers){if(p.session===q.owner||p.run.player.invulnerable>0)continue;const r=p.run.player;if(shotHitsRacer(q,r)){if(p.run.applyHit()){q.life=0;const owner=m.players.get(q.owner);if(owner)owner.run.hits++;io.to('match:'+m.id).emit('race:event',{type:'hit',from:q.seat,to:p.seat,x:r.x,y:r.y});}break;}}}
+    for(const q of m.projectiles){const target=racers.find(p=>p.seat===q.targetSeat);if(!stepCoinShot(m.track,q,DT,target?.run.player))continue;for(const p of racers){if(p.session===q.owner||p.run.player.invulnerable>0)continue;const r=p.run.player;if(shotHitsRacer(q,r)){if(p.run.applyHit()){q.life=0;const owner=m.players.get(q.owner);if(owner)owner.run.hits++;io.to('match:'+m.id).emit('race:event',{type:'hit',from:q.seat,to:p.seat,x:r.x,y:r.y});}break;}}}
     m.projectiles=m.projectiles.filter(q=>q.life>0&&q.x<m.track.finishX+800);
   }
-  function recordReplay(m){if(m.tick-m.lastReplayTick<Math.floor(TICK_RATE/REPLAY_HZ))return;m.lastReplayTick=m.tick;const s=snapshot(m);m.replay.push({t:Math.round(m.tick/TICK_RATE*1000),boostMask:m.boostMask,players:s.players.map(p=>({seat:p.seat,name:p.name,color:p.color,x:Math.round(p.x),y:Math.round(p.y),angle:Number(p.angle.toFixed(3)),finished:p.finished})),projectiles:s.projectiles.map(q=>({seat:q.seat,color:q.color,x:Math.round(q.x),y:Math.round(q.y)}))});while(m.replay.length>REPLAY_HZ*5)m.replay.shift();}
+  function recordReplay(m){if(m.tick-m.lastReplayTick<Math.floor(TICK_RATE/REPLAY_HZ))return;m.lastReplayTick=m.tick;const s=snapshot(m);m.replay.push({t:Math.round(m.tick/TICK_RATE*1000),boostMask:m.boostMask,players:s.players.map(p=>({seat:p.seat,name:p.name,color:p.color,x:Math.round(p.x),y:Math.round(p.y),angle:Number(p.angle.toFixed(3)),finished:p.finished,finishMs:p.finishMs,g:p.grounded?1:0,b:p.boost>0?1:0,s:Math.round(p.speed)})),projectiles:s.projectiles.map(q=>({seat:q.seat,color:q.color,x:Math.round(q.x),y:Math.round(q.y)}))});while(m.replay.length>REPLAY_HZ*5)m.replay.shift();}
   function persist(m){multiplayer.persistRace(m.id,m.tick,m.status,[...m.players.values()]);}
   function finishPlayer(m,p){if(p.finishMs!==null)return;p.finishMs=Math.round(m.tick/TICK_RATE*1000);const s=p.run.snapshot();multiplayer.savePlayerResult(m.id,p.session,{finishMs:p.finishMs,score:s.score,distance:Math.floor(s.x/10),coins:s.coinsCollected,shots:s.shots,hits:s.hits,respawns:s.respawns,forfeited:false});io.to('match:'+m.id).emit('race:event',{type:'finish',seat:p.seat,finishMs:p.finishMs});}
   function forfeitPlayer(m,p,reason='DNF'){if(p.forfeited||p.finishMs!==null)return;p.forfeited=true;p.run.release();const s=p.run.snapshot();multiplayer.savePlayerResult(m.id,p.session,{finishMs:null,score:s.score,distance:Math.floor(s.x/10),coins:s.coinsCollected,shots:s.shots,hits:s.hits,respawns:s.respawns,forfeited:true});io.to('match:'+m.id).emit('race:event',{type:'dnf',seat:p.seat,reason});}
@@ -96,7 +98,7 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
     // Bot shots are deliberately rare; AI should not make free play frustrating.
     if(p.run.coins>=COINS_PER_SHOT&&m.tick%480===p.seat*13%480&&m.projectiles.length<MAX_PROJECTILES){
       const target=[...m.players.values()].find(other=>!other.isBot&&other.finishMs===null&&other.run.player.x>x&&other.run.player.x-x<1000);
-      if(target&&p.run.spendShot())m.projectiles.push(coinShot(p.run,{id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color}));
+      if(target&&p.run.spendShot())m.projectiles.push(coinShot(p.run,{id:crypto.randomBytes(4).toString('hex'),owner:p.session,seat:p.seat,color:p.color,targetSeat:shotTarget(m,p)}));
     }
   }
   function stepTick(m){

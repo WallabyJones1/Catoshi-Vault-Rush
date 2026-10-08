@@ -11,7 +11,7 @@
       this.players=Array.from({length:4},(_,seat)=>({seat,name:seat?'BOT '+seat:ticket.name||'YOU',color:seat?['','#e8a13a','#ab47bc','#3ddc54'][seat]:ticket.color||'#f26b35',bot:seat>0,run:new Race.RaceRun(ticket.trackId),finishMs:null,forfeited:false}));
       this.run=this.players[0].run;
     }
-    fire(seat=0){const racer=this.players[seat];this.projectiles.push(Race.coinShot(racer.run,{id:'local-'+this.shotId++,seat,color:racer.color}));}
+    fire(seat=0){const racer=this.players[seat];const targetSeat=Race.pickShotTarget(racer.run,this.players.filter(r=>r.finishMs===null));this.projectiles.push(Race.coinShot(racer.run,{id:'local-'+this.shotId++,seat,color:racer.color,targetSeat}));}
     drive(racer){
       const run=racer.run,p=run.player,seat=racer.seat,tick=this.tick;
       const press=(hold)=>{run.press();racer.releaseAt=tick+hold;};
@@ -36,10 +36,11 @@
       Race.applyPackRules(this.players.filter(r=>r.finishMs===null).map(r=>r.run));
       for(const r of this.players){if(r.finishMs!==null)continue;if(r.bot)this.drive(r);r.run.step(dt);if(r.bot)r.run.drainEvents();if(r.run.finished){r.finishMs=Math.round((this.tick+1)/60*1000);this.firstFinish??=this.tick;}}
       const racers=this.players.filter(r=>r.finishMs===null).sort((a,b)=>b.run.player.x-a.run.player.x||a.seat-b.seat);
-      for(const q of this.projectiles){if(!Race.stepCoinShot(this.run.track,q,dt))continue;for(const r of racers){if(r.seat!==q.seat&&Race.shotHitsRacer(q,r.run.player)&&r.run.applyHit()){q.life=0;this.players[q.seat].run.hits++;break;}}}
+      for(const q of this.projectiles){const target=this.players.find(r=>r.seat===q.targetSeat&&r.finishMs===null);if(!Race.stepCoinShot(this.run.track,q,dt,target?.run.player))continue;for(const r of racers){if(r.seat!==q.seat&&Race.shotHitsRacer(q,r.run.player)&&r.run.applyHit()){q.life=0;this.players[q.seat].run.hits++;this.events.push({type:'hit',from:q.seat,to:r.seat,x:r.run.player.x,y:r.run.player.y});break;}}}
       this.projectiles=this.projectiles.filter(q=>q.life>0);this.tick++;
       if(this.players.every(r=>r.finishMs!==null)||this.tick>=RACE_LIMIT*60||(this.run.finished&&this.tick-this.firstFinish>8*60)){this.finished=true;for(const r of this.players)if(r.finishMs===null)r.forfeited=true;}
     }
+    drainEvents(){const out=this.events;this.events=[];return out;}
     snapshot(){return{matchId:this.ticket.matchId,tick:this.tick,status:this.finished?'finished':'running',players:this.players.map(r=>({seat:r.seat,name:r.name,color:r.color,bot:r.bot,finishMs:r.finishMs,forfeited:r.forfeited,...r.run.snapshot()}))};}
     visualPlayers(alpha){return this.players.slice(1).map(r=>{const p=r.run.player,old=r.run.previousPlayer;const out={seat:r.seat,name:r.name,color:r.color,finishMs:r.finishMs,forfeited:r.forfeited,...p};if(old){for(const k of ['x','y'])out[k]=old[k]+(p[k]-old[k])*alpha;out.angle=old.angle+Math.atan2(Math.sin(p.angle-old.angle),Math.cos(p.angle-old.angle))*alpha;}return out;});}
     result(){const ordered=[...this.players].sort((a,b)=>(a.finishMs??Infinity)-(b.finishMs??Infinity)||b.run.player.x-a.run.player.x);return{id:this.ticket.matchId,mode:'bots',trackName:this.run.track.name,playerCount:4,players:ordered.map((r,i)=>({you:r.seat===0,seat:r.seat,name:r.name,color:r.color,bot:r.bot,placement:i+1,finishMs:r.finishMs,forfeited:r.forfeited,score:Math.floor(r.run.score),distance:Math.floor(r.run.player.x/10),coins:r.run.coinsCollected,shots:r.run.shots,hits:r.run.hits,respawns:r.run.respawns,points:0}))};}

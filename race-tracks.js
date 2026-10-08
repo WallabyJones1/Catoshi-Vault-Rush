@@ -200,7 +200,9 @@
       track.sections.push({kind,x:start,end:start+L});
       s+=L;
     });
-    track.finishX=s+900;
+    // Finish on the ground: a run-out past the longest possible final jump.
+    const lastFlight=track.ramps.length?Math.max(...track.ramps.map(q=>flightEnd(track,q))):0;
+    track.finishX=Math.max(s+900,Math.ceil((lastFlight+700)/100)*100);
     track.ramps.sort((a,b)=>a.x-b.x).forEach((r,i)=>r.id=i);
     track.boosts=track.boosts.filter(b=>!track.gaps.some(g=>b.x>g.x-220&&b.x<g.end+220)&&!track.mud.some(m=>b.x>m.x-60&&b.x<m.end+60))
       .sort((a,b)=>a.x-b.x).map((b,i)=>({...b,id:i}));

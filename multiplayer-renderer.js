@@ -135,7 +135,7 @@
       for(let row=0;row<2;row++)for(let col=0;col<8;col++){ctx.fillStyle=(row+col)%2?'#0a0908':'#f2efe9';ctx.fillRect(col*13.75,-122+row*14,13.75,14);}ctx.fillStyle='#e8a13a';ctx.font='700 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('FINISH',55,-92);ctx.restore();
     }
     remoteRacers(run,left,right,portrait){
-      const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=r.grounded||!Number.isFinite(r.y)?run.terrain(r.x):r.y,angle=r.grounded?run.slope(r.x):r.angle||0,frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(angle);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
+      const ctx=this.ctx,dt=this.lastDt||1/60;for(const r of this.raceEntities){if(r.forfeited)continue;const ry=r.grounded||!Number.isFinite(r.y)?run.terrain(r.x):r.y,trail=this.recordTrail('seat'+r.seat,r.x,ry-18,r.finishMs==null&&(r.boost>0||r.speed>1060),dt);if(r.x<left-80||r.x>right+80)continue;this.drawTrail(trail,r.color||'#f4c542',portrait?13:10);const y=ry,angle=r.grounded?run.slope(r.x):r.angle||0,frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(angle);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
       for(const q of this.projectiles){if(q.x<left-60||q.x>right+30)continue;
         // A 150 km/h coin leaves a short speed streak in its owner's colour.
         ctx.save();ctx.translate(q.x,q.y);ctx.globalAlpha=.45;ctx.strokeStyle=q.color||'#f4c542';ctx.lineWidth=3;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(-54,0);ctx.lineTo(-10,0);ctx.stroke();
@@ -270,6 +270,9 @@
       if(this.networkOffset){for(const key of ['x','y','angle'])this.visualPlayer[key]+=this.networkOffset[key]||0;}
       if(this.visualPlayer.grounded){this.visualPlayer.y=run.terrain(this.visualPlayer.x);this.visualPlayer.angle=run.slope(this.visualPlayer.x);}
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
+      this.lastDt=dt;const boosting=(p.rush>0||p.boost>0);
+      this.heroTrail=this.recordTrail('hero',p.x,p.y-18,!run.dead&&this.intro<=0&&(boosting||p.speed>1060),dt);this.heroTrailBoost=boosting;
+      this.speedLevel=run.dead||this.intro>0?0:Math.max(boosting?.85:0,clamp((p.speed-1060)/(1450-1060),0,1));
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
       const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011;
@@ -542,6 +545,44 @@
         ctx.restore();
       }
     }
+    // Motion trail: the last ~0.2s of a racer's real path, drawn as a tapering ribbon.
+    recordTrail(key,x,y,active,dt){
+      if(!this.trails)this.trails=new Map();let t=this.trails.get(key);
+      if(!t){t={points:[],fade:0};this.trails.set(key,t);}
+      const last=t.points[t.points.length-1];
+      if(last&&Math.hypot(x-last.x,y-last.y)>600)t.points.length=0; // respawns and replay loops
+      for(const q of t.points)q.age+=dt;t.points.push({x,y,age:0});
+      while(t.points.length&&t.points[0].age>.2)t.points.shift();
+      t.fade=clamp(t.fade+(active?dt*7:-dt*4),0,1);return t;
+    }
+    drawTrail(t,color,width){
+      if(!t||t.fade<=0||t.points.length<3)return;const ctx=this.ctx,pts=t.points,n=pts.length;
+      const rgb=/^#([0-9a-f]{6})$/i.test(color)?[16,8,0].map(s=>parseInt(color.slice(1),16)>>s&255).join(','):'242,239,233';
+      // Three continuous strokes (thin full length, then thicker toward the racer)
+      // give a smooth taper without the beading of per-segment caps.
+      ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+      for(const [from,w,a] of [[0,.35,.45],[.4,.7,.5],[.72,1,.55]]){
+        const i0=Math.floor(from*(n-1)),head=pts[n-1],tail=pts[i0];
+        const g=ctx.createLinearGradient(tail.x,tail.y,head.x,head.y);
+        g.addColorStop(0,'rgba('+rgb+',0)');g.addColorStop(1,'rgba('+rgb+','+(a*t.fade).toFixed(3)+')');
+        ctx.strokeStyle=g;ctx.lineWidth=Math.max(1,width*w);ctx.beginPath();ctx.moveTo(tail.x,tail.y);
+        for(let i=i0+1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Screen-edge speed streaks near top speed; the centre of the screen stays clear.
+    speedLines(level){
+      if(level<=.02)return;const ctx=this.ctx,W=this.width,H=this.height;
+      ctx.save();ctx.strokeStyle='#f2efe9';ctx.lineCap='round';
+      for(let i=0;i<9;i++){
+        const seed=Math.abs(Math.sin(i*12.9898)*43758.5453)%1,band=i%2?.04+seed*.22:.74+seed*.2;
+        const len=70+seed*130,travel=(this.clock*(1500+seed*900)+i*397)%(W+len*2);
+        const x=W+len-travel,y=H*band;
+        ctx.globalAlpha=level*(.07+seed*.09);ctx.lineWidth=1+seed*1.2;
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+len,y);ctx.stroke();
+      }
+      ctx.restore();
+    }
     heart(x,y,size) {
       const ctx=this.ctx;
       ctx.save();ctx.translate(x,y);ctx.scale(size/24,size/24);
@@ -672,12 +713,11 @@
         for(let i=0;i<4;i++){const off=(this.clock*900+i*37)%120,yy=actorY-8-i*9;ctx.beginPath();ctx.moveTo(actorX+40-off,yy);ctx.lineTo(actorX+12-off,yy);ctx.stroke();}
         ctx.restore();
       }
-      if(p.rush>0){
-        // Warm shield and short motion trails, leaving the cat's face readable.
+      if(this.intro<=0&&!crash)this.drawTrail(this.heroTrail,this.heroTrailBoost?'#f4c542':'#f2efe9',portrait?16:12);
+      if((p.rush>0||p.boost>0)){
+        // Warm shield, leaving the cat's face readable.
         ctx.save();ctx.strokeStyle='rgba(232,161,58,.65)';ctx.lineWidth=1.3;
-        ctx.beginPath();ctx.ellipse(actorX,actorY-20,portrait?39:29,portrait?34:26,p.angle,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(232,161,58,.25)';
-        for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(actorX-28-i*9,actorY-12-i*8);ctx.lineTo(actorX-62-i*14,actorY-12-i*8);ctx.stroke();}ctx.restore();
+        ctx.beginPath();ctx.ellipse(actorX,actorY-20,portrait?39:29,portrait?34:26,p.angle,0,Math.PI*2);ctx.stroke();ctx.restore();
       }
       ctx.save();ctx.translate(actorX+crashTravel,actorY-1+(crash?.reason==='MISSED THE GAP'?age*age*140:-(crash?Math.sin(age*Math.PI/.75)*16:0)));
       ctx.rotate(crash?crash.angle-Math.min(age/.62,1)*Math.PI*.65:this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
@@ -689,14 +729,14 @@
         ctx.save();ctx.globalAlpha=this.flipPulse/.24*.45;ctx.strokeStyle='#e8a13a';ctx.lineWidth=1.5;
         ctx.beginPath();ctx.arc(0,-18,portrait?32:23,-.4,Math.PI*1.1);ctx.stroke();ctx.restore();
       }
-      if(p.rush<=0&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
+      if(!((p.rush>0||p.boost>0))&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
       let extra=-1;
       if(this.images.extras){
         if(crash||p.stagger>0)extra=6;
         else if(this.intro>BREACH_REMAINING)extra=2;
         else if(this.intro>.30||this.jumpPose>0)extra=4;
         else if(this.landPose>0||this.intro>0)extra=5;
-        else if(p.rush>0)extra=7;
+        else if((p.rush>0||p.boost>0))extra=7;
         else if(p.rail)extra=3;
         else if(!p.grounded&&!(p.held&&p.heldTime>.14))extra=4;
         else if(p.grounded){
@@ -710,6 +750,7 @@
       ctx.restore();
       if(this.raceIdentity&&this.intro<=0)this.racerLabel(this.raceIdentity.name,this.raceIdentity.color,actorX,actorY-(portrait?66:50),portrait);
       ctx.restore();ctx.globalAlpha=1;
+      this.speedLines(this.speedLevel||0);
       if(this.intro>0 && this.intro<=BREACH_REMAINING && this.intro>BREACH_REMAINING-.09){
         ctx.fillStyle='rgba(242,239,233,'+((this.intro-(BREACH_REMAINING-.09))/.09*.07)+')';ctx.fillRect(0,0,W,H);
       }

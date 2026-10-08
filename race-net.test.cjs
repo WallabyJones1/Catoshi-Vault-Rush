@@ -1,6 +1,6 @@
 'use strict';
 const {test}=require('node:test'),assert=require('node:assert/strict');
-const {RaceRun,coinShot,stepCoinShot,shotHitsRacer,SHOT_SPEED}=require('./race-engine.js');
+const {RaceRun,coinShot,stepCoinShot,pickShotTarget,shotHitsRacer,SHOT_SPEED}=require('./race-engine.js');
 const {TRACKS,terrainAt,gapAt}=require('./race-tracks.js');
 const {Prediction,RemoteBuffer}=require('./race-net.js');
 test('prediction restores complete physics and replays an unacknowledged jump without duplicating effects',()=>{
@@ -37,22 +37,32 @@ test('remote interpolation smooths movement and takes the shortest rotation acro
   const p=net.sample(166).players[0];assert.ok(p.x>100&&p.x<180);assert.ok(Math.abs(p.angle)>3);
   net.push({tick:99,players:[]},200);assert.equal(net.frames.length,2);
 });
-test('coin shots leave the front of the racer at 150 km/h, from the ground or mid-air, then roll on the sand',()=>{
-  assert.equal(SHOT_SPEED,1500,'150 km/h on the HUD (speed x 0.1)');
+test('coin shots leave the front of the racer at 300 km/h, from the ground or mid-air, then roll on the sand',()=>{
+  assert.equal(SHOT_SPEED,3000,'300 km/h on the HUD (speed x 0.1)');
   for(const track of TRACKS){
     // Mid-air: the coin starts at the racer's chest, ahead of them, well above the sand.
     const run=new RaceRun(track.id),x=track.sections.find(s=>'RP'.includes(s.kind)).x+500;Object.assign(run.player,{x,y:terrainAt(track,x)-360,grounded:false,vx:1000,vy:-200,angle:0});
     const q=coinShot(run);assert(q.x>run.player.x+15&&q.x<run.player.x+45,'from the front');assert(Math.abs(q.y-(run.player.y-20))<25,'at body height');
     assert(terrainAt(track,q.x)-q.y>250,'fired from the air, not snapped to the ground');assert.equal(q.vx,SHOT_SPEED);
     let rolled=false,bounced=false,frames=0;
-    for(let i=0;i<144;i++){if(!stepCoinShot(track,q,1/60))break;frames++;const clearance=terrainAt(track,q.x)-q.y;if(q.mode==='roll'){rolled=true;assert.ok(clearance>=8&&clearance<=26);bounced ||=clearance>15;}}
-    assert.ok(rolled,track.id+' air shot lands and rolls');assert.ok(bounced);assert.notEqual(q.angle,0);
+    for(let i=0;i<96;i++){if(!stepCoinShot(track,q,1/60))break;frames++;const clearance=terrainAt(track,q.x)-q.y;if(!gapAt(track,q.x))assert.ok(clearance>=7,track.id+' never passes through the sand');if(q.mode==='roll'){rolled=true;assert.ok(clearance>=8&&clearance<=26);bounced ||=clearance>15;}}
+    assert.ok(!rolled||bounced);assert.notEqual(q.angle,0);assert(q.x-run.player.x>2500,'covers real distance');
     // On the ground: it leaves just ahead of the racer and hugs the sand.
     const g=new RaceRun(track.id);g.player.x=2000;g.player.y=g.terrain(2000);const s=coinShot(g);
     assert(s.x>g.player.x&&terrainAt(track,s.x)-s.y<40);
   }
 });
-test('a 150 km/h coin hits a racer it passes between ticks',()=>{
+test('a guided coin catches a racer far ahead, even mid-jump, but turns too slowly for point-blank swerves',()=>{
+  const track=TRACKS[0],x0=track.sections.find(s=>'RP'.includes(s.kind)).x+300;
+  const shooter=new RaceRun(track.id);Object.assign(shooter.player,{x:x0,y:terrainAt(track,x0),grounded:true,speed:1100,vx:1100});
+  const target=new RaceRun(track.id);Object.assign(target.player,{x:x0+2200,y:terrainAt(track,x0+2200)-260,grounded:false,vx:1150,vy:-150,speed:1150});
+  assert.equal(pickShotTarget(shooter,[{seat:1,run:shooter},{seat:2,run:target}]),2,'locks on to the racer ahead');
+  const q=coinShot(shooter,{targetSeat:2});let hit=false;
+  for(let i=0;i<96&&!hit;i++){target.step(1/60);if(!stepCoinShot(track,q,1/60,target.player))break;hit=shotHitsRacer(q,target.player);}
+  assert(hit,'a guided coin reaches a racer 220 m ahead in the air');
+  const none=new RaceRun(track.id);none.player.x=x0;assert.equal(pickShotTarget(none,[{seat:1,run:none}]),null,'no target behind or alone');
+});
+test('a fast coin hits a racer it passes between ticks',()=>{
   const q={x:1000,y:180,previousX:975,previousY:180};assert(shotHitsRacer(q,{x:990,y:200}));assert(!shotHitsRacer(q,{x:1200,y:200}));
   const fast={x:1050,y:180,previousX:950,previousY:180};assert(shotHitsRacer(fast,{x:1000,y:200}),'swept test cannot tunnel');
 });

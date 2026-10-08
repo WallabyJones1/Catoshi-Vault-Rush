@@ -243,6 +243,9 @@
         this.visualPlayer.angle=old.angle+Math.atan2(Math.sin(current.angle-old.angle),Math.cos(current.angle-old.angle))*t;
       }
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
+      this.lastDt=dt;const boosting=p.rush>0;
+      this.heroTrail=this.recordTrail('hero',p.x,p.y-18,!run.dead&&this.intro<=0&&(boosting||p.speed>820),dt);this.heroTrailBoost=boosting;
+      this.speedLevel=run.dead||this.intro>0?0:Math.max(boosting?.85:0,clamp((p.speed-820)/(1280-820),0,1));
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
       const upcomingDrop=p.grounded?Math.max(0,run.terrain(p.x+clamp(p.speed*.85,280,670))-p.y):0;
@@ -549,6 +552,44 @@
         ctx.strokeStyle='rgba(232,161,58,.42)';ctx.lineWidth=1;ctx.stroke();
       }
     }
+    // Motion trail: the last ~0.2s of a racer's real path, drawn as a tapering ribbon.
+    recordTrail(key,x,y,active,dt){
+      if(!this.trails)this.trails=new Map();let t=this.trails.get(key);
+      if(!t){t={points:[],fade:0};this.trails.set(key,t);}
+      const last=t.points[t.points.length-1];
+      if(last&&Math.hypot(x-last.x,y-last.y)>600)t.points.length=0; // respawns and replay loops
+      for(const q of t.points)q.age+=dt;t.points.push({x,y,age:0});
+      while(t.points.length&&t.points[0].age>.2)t.points.shift();
+      t.fade=clamp(t.fade+(active?dt*7:-dt*4),0,1);return t;
+    }
+    drawTrail(t,color,width){
+      if(!t||t.fade<=0||t.points.length<3)return;const ctx=this.ctx,pts=t.points,n=pts.length;
+      const rgb=/^#([0-9a-f]{6})$/i.test(color)?[16,8,0].map(s=>parseInt(color.slice(1),16)>>s&255).join(','):'242,239,233';
+      // Three continuous strokes (thin full length, then thicker toward the racer)
+      // give a smooth taper without the beading of per-segment caps.
+      ctx.save();ctx.lineCap='round';ctx.lineJoin='round';
+      for(const [from,w,a] of [[0,.35,.45],[.4,.7,.5],[.72,1,.55]]){
+        const i0=Math.floor(from*(n-1)),head=pts[n-1],tail=pts[i0];
+        const g=ctx.createLinearGradient(tail.x,tail.y,head.x,head.y);
+        g.addColorStop(0,'rgba('+rgb+',0)');g.addColorStop(1,'rgba('+rgb+','+(a*t.fade).toFixed(3)+')');
+        ctx.strokeStyle=g;ctx.lineWidth=Math.max(1,width*w);ctx.beginPath();ctx.moveTo(tail.x,tail.y);
+        for(let i=i0+1;i<n;i++)ctx.lineTo(pts[i].x,pts[i].y);ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Screen-edge speed streaks near top speed; the centre of the screen stays clear.
+    speedLines(level){
+      if(level<=.02)return;const ctx=this.ctx,W=this.width,H=this.height;
+      ctx.save();ctx.strokeStyle='#f2efe9';ctx.lineCap='round';
+      for(let i=0;i<9;i++){
+        const seed=Math.abs(Math.sin(i*12.9898)*43758.5453)%1,band=i%2?.04+seed*.22:.74+seed*.2;
+        const len=70+seed*130,travel=(this.clock*(1500+seed*900)+i*397)%(W+len*2);
+        const x=W+len-travel,y=H*band;
+        ctx.globalAlpha=level*(.07+seed*.09);ctx.lineWidth=1+seed*1.2;
+        ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+len,y);ctx.stroke();
+      }
+      ctx.restore();
+    }
     heart(x,y,size) {
       const ctx=this.ctx;
       ctx.save();ctx.translate(x,y);ctx.scale(size/24,size/24);
@@ -704,12 +745,11 @@
       else if(this.intro>0)frame=6;
       const crash=this.crashPose,age=crash?Math.min(.75,crash.age):0;
       const crashTravel=crash?Math.min(24,crash.speed*.06)*Math.sin(age*Math.PI/.75):0;
+      if(this.intro<=0&&!crash)this.drawTrail(this.heroTrail,this.heroTrailBoost?'#f4c542':'#f2efe9',portrait?16:12);
       if(p.rush>0){
-        // Warm shield and short motion trails, leaving the cat's face readable.
+        // Warm shield, leaving the cat's face readable.
         ctx.save();ctx.strokeStyle='rgba(232,161,58,.65)';ctx.lineWidth=1.3;
-        ctx.beginPath();ctx.ellipse(actorX,actorY-20,portrait?39:29,portrait?34:26,p.angle,0,Math.PI*2);ctx.stroke();
-        ctx.strokeStyle='rgba(232,161,58,.25)';
-        for(let i=0;i<3;i++){ctx.beginPath();ctx.moveTo(actorX-28-i*9,actorY-12-i*8);ctx.lineTo(actorX-62-i*14,actorY-12-i*8);ctx.stroke();}ctx.restore();
+        ctx.beginPath();ctx.ellipse(actorX,actorY-20,portrait?39:29,portrait?34:26,p.angle,0,Math.PI*2);ctx.stroke();ctx.restore();
       }
       ctx.save();ctx.translate(actorX+crashTravel,actorY-1+(crash?.reason==='MISSED THE GAP'?age*age*140:-(crash?Math.sin(age*Math.PI/.75)*16:0)));
       ctx.rotate(crash?crash.angle-Math.min(age/.62,1)*Math.PI*.65:this.intro>0?run.slope(actorX)-Math.sin(launch*Math.PI)*.2:p.angle);
@@ -721,7 +761,7 @@
         ctx.save();ctx.globalAlpha=this.flipPulse/.24*.45;ctx.strokeStyle='#e8a13a';ctx.lineWidth=1.5;
         ctx.beginPath();ctx.arc(0,-18,portrait?32:23,-.4,Math.PI*1.1);ctx.stroke();ctx.restore();
       }
-      if(p.rush<=0&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
+      if(!(p.rush>0)&&p.invulnerable>0 && Math.floor(run.time*12)%2)ctx.globalAlpha=.8;
       let extra=-1;
       if(this.images.extras){
         if(crash||p.stagger>0)extra=6;
@@ -740,6 +780,7 @@
       }
       this.sprite(extra>=0?this.images.extras:this.images.characters,extra>=0?extraCharacters[extra]:characters[frame],0,0,portrait?60:40,false);
       ctx.restore();ctx.restore();ctx.globalAlpha=1;
+      this.speedLines(this.speedLevel||0);
       if(run.dog.active&&run.dog.warning){
         const x=(p.x-run.dog.distance-cam.x)*cam.zoom;
         if(x<14){
