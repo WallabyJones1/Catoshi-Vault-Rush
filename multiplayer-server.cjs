@@ -5,7 +5,7 @@ const crypto=require('node:crypto');
 const fs=require('node:fs');
 const path=require('node:path');
 const {DatabaseSync}=require('node:sqlite');
-const {HttpError}=require('./security.cjs');
+const {HttpError}=require('./mp-security.cjs');
 const {currentRound}=require('./periods.cjs');
 const {createMultiplayer}=require('./multiplayer.cjs');
 const {getTrack}=require('./race-tracks.js');
@@ -13,7 +13,8 @@ const BASE=__dirname;
 const COOKIE='rush_mp_session';
 const SESSION_MS=30*86400000;
 const MIME={'.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.jpg':'image/jpeg','.svg':'image/svg+xml','.html':'text/html; charset=utf-8','.woff2':'font/woff2','.mp3':'audio/mpeg','.ogg':'audio/ogg','.wav':'audio/wav'};
-const STATIC=new Set(['multiplayer.html','replay.html','multiplayer.js','multiplayer-game.js','renderer.js','sound.js','audio-config.js','race-tracks.js','race-engine.js','replay.js','styles.css',
+const STATIC=new Set(['multiplayer.html','replay.html','multiplayer.js','multiplayer-game.js','renderer.js','multiplayer-renderer.js','sound.js','audio-config.js','race-tracks.js','race-engine.js','replay.js','styles.css','multiplayer-lobby.css',
+  ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>font+'.woff2'),
   'catoshi-clean-actions.png','catoshi-actions-extra-v1.png','catoshi-coin.png','canyon-atmosphere.png','canyon-endless-layers.png','vault-scenery-atlas.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','rush-pickups-v2.png','sky-terrain-details-v1.png',
   ...['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red'].map(s=>'sfx-'+s+'-v1.wav'), 'music.mp3','music.ogg','music.wav']);
 const SAFE_HEADERS={'X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin','X-Frame-Options':'SAMEORIGIN',
@@ -43,17 +44,18 @@ function createApp({database=process.env.MP_DATABASE_PATH||process.env.DATABASE_
   }
   function send(res,status,body,type='application/json; charset=utf-8',extra={}){res.writeHead(status,{...SAFE_HEADERS,'Content-Type':type,'Cache-Control':type.startsWith('text/html')?'no-cache':'no-store',...extra});res.end(type.startsWith('application/json')?JSON.stringify(body):body);}
   function fail(res,error){const status=Number.isInteger(error?.status)?error.status:500; if(status>=500)console.error('[multiplayer]',error);send(res,status>=400&&status<=599?status:500,{error:status>=500?'Multiplayer service unavailable. Please try again.':error.message});}
-  function throttle(req){const key=req.socket.remoteAddress||'unknown',t=now(),value=limits.get(key)||{at:t,count:0};if(t-value.at>60000){value.at=t;value.count=0;}limits.set(key,value);if(++value.count>180)throw new HttpError(429,'Please wait a moment and retry.');if(limits.size>2000)for(const [k,v]of limits)if(t-v.at>60000)limits.delete(k);}
+  function throttle(req,session){const key=session||req.socket.remoteAddress||'unknown',t=now(),value=limits.get(key)||{at:t,count:0};if(t-value.at>60000){value.at=t;value.count=0;}limits.set(key,value);if(++value.count>180)throw new HttpError(429,'Please wait a moment and retry.');if(limits.size>2000)for(const [k,v]of limits)if(t-v.at>60000)limits.delete(k);}
   function htmlReplay(id){const text=fs.readFileSync(path.join(BASE,'replay.html'),'utf8');const title=getTrack(mp.replay(id).trackId).name+' · Catoshi Multiplayer Replay';const origin=publicOrigin||'';
     return text.replace('<head>',`<head><base href="/mp/"><meta property="og:title" content="${title}"><meta property="og:description" content="Watch the final 5 seconds of a free Catoshi multiplayer race."><meta name="twitter:card" content="summary_large_image"><meta property="og:image" content="${origin}/mp/canyon-atmosphere.png">`);
   }
   async function handler(req,res){
     try{
       if(!['GET','HEAD'].includes(req.method))throw new HttpError(405,'Method not allowed.');
-      const url=new URL(req.url,'http://localhost');throttle(req);
+      const url=new URL(req.url,'http://localhost');
       if(url.pathname==='/health'){db.prepare('SELECT 1').get();send(res,200,{ok:true,service:'catoshi-multiplayer',version:'5.0.0',realtime:!!live});return;}
       if(url.pathname.startsWith('/api/')){
         const s=ensureSession(req,res);
+        throttle(req,s.id);
         if(url.pathname==='/api/multiplayer/profile')return send(res,200,mp.profile(s.id));
         if(url.pathname==='/api/multiplayer/state'){const active=mp.getActiveMatch(s.id);return send(res,200,{queue:mp.queueState(s.id),match:active?mp.publicMatch(active.id,s.id):null,profile:mp.profile(s.id)});}
         if(url.pathname==='/api/multiplayer/leaderboard'){
@@ -74,12 +76,18 @@ function createApp({database=process.env.MP_DATABASE_PATH||process.env.DATABASE_
       if(replay){if(!mp.replay(replay[1]))throw new HttpError(404,'Replay not found.');return send(res,200,htmlReplay(replay[1]),'text/html; charset=utf-8');}
       const asset=url.pathname.slice(1);
       if(!STATIC.has(asset))throw new HttpError(404,'Not found.');
-      const file=path.join(BASE,asset);if(!fs.existsSync(file))throw new HttpError(404,'Asset unavailable.');
+      const file=path.join(BASE,asset==='renderer.js'?'multiplayer-renderer.js':asset);if(!fs.existsSync(file))throw new HttpError(404,'Asset unavailable.');
       return send(res,200,fs.readFileSync(file),MIME[path.extname(file)]||'application/octet-stream',{'Cache-Control':'public, max-age=3600'});
     }catch(err){fail(res,err);}
   }
   server=http.createServer(handler);server.requestTimeout=15000;server.headersTimeout=16000;
-  if(realtime){live=require('./realtime.cjs').attachRealtime({server,multiplayer:mp,sessionFromRequest,now});}
+  if(realtime){live=require('./realtime.cjs').attachRealtime({server,multiplayer:mp,sessionFromRequest,now,allowRequest(req,callback){
+    const origin=req.headers.origin;
+    // The loopback bridge overwrites this header; external clients cannot choose it.
+    const forwarded=req.socket.remoteAddress==='127.0.0.1'?req.headers['x-catoshi-origin']:null;
+    const local=(process.env.NODE_ENV==='production'?'https://':'http://')+req.headers.host;
+    callback(null,!origin||origin===publicOrigin||origin===forwarded||origin===local);
+  }});}
   return {server,db,multiplayer:mp,realtime:live,sessionFromRequest,async close(){live?.close();await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));db.close();}};
 }
 if(require.main===module){

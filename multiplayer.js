@@ -3,6 +3,7 @@
   const $=id=>document.getElementById(id);
   const INVITE_CODE=(new URLSearchParams(location.search).get('invite')||'').toUpperCase();
   const NAME_KEY='rush-multiplayer-name',COLOR_KEY='rush-multiplayer-color';
+  function notifyParent(type){if(parent!==window)parent.postMessage({type},location.origin);}
   let socket=null,profile=null,currentLobby=null,queueActive=false,currentTicket=null,currentSnapshot=null,seq=0,boardTimer=null,boardRound=null,currentBoardRound=null,boardMode='week';
 
   async function api(endpoint,timeout=9000){
@@ -49,9 +50,9 @@
     if(socket)return socket;
     if(typeof io!=='function')throw Error('Realtime multiplayer client did not load. Reload this page.');
     socket=io({path:'/mp/socket.io',transports:['websocket'],upgrade:false,reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:400,reconnectionDelayMax:4000,timeout:8000});
-    socket.on('connect',()=>{status(queueActive?'LIVE · matchmaking connected.':'LIVE MULTIPLAYER READY','good');if(currentTicket)socket.emit('race:resume',{matchId:currentTicket.matchId},reply=>{if(reply?.ok){currentTicket=reply.ticket;handleSnapshot(reply.snapshot);}});});
+    socket.on('connect',()=>{notifyParent('catoshi:multiplayer-ready');status(queueActive?'LIVE · matchmaking connected.':'LIVE MULTIPLAYER READY','good');if(currentTicket)socket.emit('race:resume',{matchId:currentTicket.matchId},reply=>{if(reply?.ok){currentTicket=reply.ticket;handleSnapshot(reply.snapshot);}});});
     socket.on('disconnect',()=>{if(queueActive||currentTicket)status('Connection interrupted · reconnecting…');window.VaultRushGame?.multiplayerConnection?.(false);});
-    socket.on('connect_error',e=>status('Realtime connection unavailable: '+(e.message||'retrying'),'error'));
+    socket.on('connect_error',e=>{notifyParent('catoshi:multiplayer-error');status('Realtime connection unavailable: '+(e.message||'retrying'),'error');});
     socket.on('queue:state',renderQueue);
     socket.on('lobby:state',lobbyStatus);
     socket.on('race:ticket',ticket=>{lobbyStatus(null);currentTicket=ticket;seq=0;queueActive=false;renderQueue(null);status('Race found · '+ticket.trackName,'good');window.VaultRushGame?.startMultiplayer?.(ticket);});
@@ -129,7 +130,7 @@
     $('close-embed').addEventListener('click',()=>parent.postMessage({type:'catoshi:close-multiplayer'},location.origin));
     $('multiplayer-quick').addEventListener('click',quickRace);$('multiplayer-cancel').addEventListener('click',cancelQueue);$('multi-board-refresh').addEventListener('click',refreshBoard);$('multi-board-current').addEventListener('click',()=>{boardMode='week';boardRound=null;refreshBoard();});$('multi-board-previous').addEventListener('click',()=>{boardMode='week';if(currentBoardRound!==null){boardRound=currentBoardRound-1;refreshBoard();}});$('multi-board-lifetime').addEventListener('click',()=>{boardMode='lifetime';refreshBoard();});$('multi-board-tracks').addEventListener('click',()=>{boardMode='track';refreshBoard();});$('multi-track-select').addEventListener('change',refreshBoard);
     document.addEventListener('visibilitychange',()=>{if(!document.hidden&&$('multiplayer-home').classList.contains('active'))refreshBoard();});
-    try{renderProfile(await api('profile'));await ensureSocket();if(INVITE_CODE){$('friend-code').value=INVITE_CODE;await friendAction('lobby:join',{code:INVITE_CODE});}}catch(e){status(e.message||'Multiplayer is temporarily unavailable.','error');}
+    try{renderProfile(await api('profile'));await ensureSocket();if(INVITE_CODE){$('friend-code').value=INVITE_CODE;await friendAction('lobby:join',{code:INVITE_CODE});}}catch(e){notifyParent('catoshi:multiplayer-error');status(e.message||'Multiplayer is temporarily unavailable.','error');}
     refreshBoard();clearInterval(boardTimer);boardTimer=setInterval(()=>{if(!document.hidden&&$('multiplayer-home').classList.contains('active'))refreshBoard();},10000);
   }
 

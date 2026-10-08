@@ -9,9 +9,13 @@
   "scripts": {
     "start": "node server.cjs",
     "start:multiplayer": "node multiplayer-server.cjs",
-    "test": "node --test race.test.cjs multiplayer.test.cjs server.test.cjs isolation.test.cjs main-integration.test.cjs"
+    "test": "node --test *.test.cjs test.cjs",
+    "verify": "node verify-install.cjs"
   },
   "dependencies": {
     "socket.io": "4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "4.8.1"
   }
 }

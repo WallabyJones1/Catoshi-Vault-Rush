@@ -2,6 +2,9 @@
   'use strict';
   const $=id=>document.getElementById(id);
   const sound=window.RushSound||{unlock(){},setPlaying(){},effect(){},burst(){}};
+  // Prime audio during the actual tap, not the asynchronous race-ticket callback.
+  document.addEventListener('pointerdown',()=>sound.unlock(),{capture:true,passive:true});
+  document.addEventListener('keydown',()=>sound.unlock(),{capture:true});
   const screens=Array.from(document.querySelectorAll('.screen'));
   const canvas=$('game'),shell=canvas.parentElement,ctx=canvas.getContext('2d');
   const STEP=1/60;
@@ -18,12 +21,13 @@
 
   async function begin(multiplayerTicket){
     if(phase==='loading'||!multiplayerTicket?.matchId)return;
-    sound.unlock();sound.setPlaying(false);const operation=++startId;cancelAnimationFrame(raf);releaseInput();phase='loading';ticket=multiplayerTicket;lastRaceMode=ticket.mode||'public';$('mode-label').textContent=(ticket.trackName||'MULTIPLAYER')+' · '+ticket.playerCount+' RACERS';$('countdown').textContent='LOADING';$('race-standings').hidden=false;show('game-screen');resizeGame();drawLoading();
+    sound.unlock();sound.setPlaying(false);const operation=++startId,receivedAt=performance.now();cancelAnimationFrame(raf);releaseInput();phase='loading';ticket=multiplayerTicket;lastRaceMode=ticket.mode||'public';$('mode-label').textContent=(ticket.trackName||'MULTIPLAYER')+' · '+ticket.playerCount+' RACERS';$('countdown').textContent='LOADING';$('race-standings').hidden=false;show('game-screen');resizeGame();drawLoading();
     try{
       if(!ctx||typeof VaultRace==='undefined'||typeof VaultRushRenderer==='undefined')throw Error('Multiplayer game unavailable.');
       const images=await artworkReady();if(operation!==startId)return;
       renderer=new VaultRushRenderer.Renderer(ctx,images);run=new VaultRace.RaceRun(ticket.trackId);renderer.setRaceIdentity?.({name:window.RushMultiplayer?.name?.()||'YOU',color:window.RushMultiplayer?.color?.()||'#f4c542',seat:ticket.seat});renderer.reset(run);renderer.breakout(run);renderer.draw(run);
-      phase='countdown';countdown=Math.max(.05,(ticket.startDelayMs??Math.max(0,ticket.startAt-Date.now()))/1000);accumulator=0;trickTime=0;$('countdown').textContent='READY';updateHud();sound.setPlaying(true);last=performance.now();canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);
+      const delay=ticket.startDelayMs??ticket.startAt-(ticket.serverTime??Date.now());
+      phase='countdown';countdown=Math.max(.05,(delay-(performance.now()-receivedAt))/1000);accumulator=0;trickTime=0;$('countdown').textContent='READY';updateHud();sound.setPlaying(true);last=performance.now();canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);
     }catch(error){if(operation!==startId)return;stopRace({forfeit:true});setStatus(error.message||'Could not load the race. Please retry.','error');}
   }
 

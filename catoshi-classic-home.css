@@ -175,7 +175,7 @@
   background: var(--black, #100d0c);
   box-sizing: border-box;
 }
-#gate .mode-switch:has(> #mode-multiplayer) {
+#gate .mode-switch {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 #gate .mode-switch > button {

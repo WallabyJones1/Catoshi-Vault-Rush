@@ -12,12 +12,13 @@ const {picture}=require('./share-card.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
+const BUILD_ID='site-repair-19';
 // Public permalink and image previews never advertise an internal Railway host.
 const CANONICAL_SHARE_ORIGIN='https://vaultrush.catoshirush.fun';
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
 const STATIC_FILES=new Map([
-  ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['mp-tab.js','text/javascript'],['engine.js','text/javascript'],
+  ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['catoshi-classic-home.css','text/css'],['mp-tab.js','text/javascript'],['engine.js','text/javascript'],
   ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>[font+'.woff2','font/woff2']),
   ['renderer.js','text/javascript'],['game.js','text/javascript'],['online.js','text/javascript'],['ghost.js','text/javascript'],
   ['sound.js','text/javascript'],['audio-config.js','text/javascript'],['catoshi-coin.png','image/png'],
@@ -205,6 +206,7 @@ function createApp(config,options={}) {
     return origin===config.origin||origin===siteOrigin(req);
   }
   const server=http.createServer(async(req,res)=>{
+    res.setHeader('X-Catoshi-Build',BUILD_ID);
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','strict-origin-when-cross-origin');
     res.setHeader('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
     if(config.production)res.setHeader('Strict-Transport-Security','max-age=31536000');
@@ -213,7 +215,7 @@ function createApp(config,options={}) {
       if(url.pathname==='/mp'||url.pathname.startsWith('/mp/')){
         require('./mp-bridge.cjs').forward(req,res);return;
       }
-      if(req.method==='GET'&&url.pathname==='/health'){json(res,{ok:true});return;}
+      if(req.method==='GET'&&url.pathname==='/health'){json(res,{ok:true,build:BUILD_ID,engine:ENGINE_VERSION});return;}
       if(url.pathname.startsWith('/api/')){
         rate(req,'api',180);
         if(req.method==='POST'&&!sameOrigin(req))throw new HttpError(403,'Same-origin request required.');
@@ -221,7 +223,7 @@ function createApp(config,options={}) {
           const round=currentRound(now()),window=roundWindow(round);
           const snapshot=ensureRound(db,round,config);
           const rewards=publicRewards(snapshot,config);
-          json(res,{engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{build:BUILD_ID,engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/trials/leaderboard'){
           const level=Number(url.searchParams.get('level')),course=trialCourse(level);
@@ -394,8 +396,9 @@ function createApp(config,options={}) {
 }
 if(require.main===module){
   const config=configFromEnv();const app=createApp(config);
-  const multiplayer=require('./mp-bridge.cjs');multiplayer.install(app.server);
+  let multiplayer;
+  try{multiplayer=require('./mp-bridge.cjs');multiplayer.install(app.server);}catch(error){console.error('[multiplayer] disabled:',error.message);}
   app.server.listen(config.port,'0.0.0.0',()=>console.log('Catoshi web server listening on port',config.port));
-  for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{multiplayer.stop();app.server.close(()=>{app.db.close();process.exit(0);});});
+  for(const signal of ['SIGTERM','SIGINT'])process.on(signal,()=>{multiplayer?.stop();app.server.close(()=>{app.db.close();process.exit(0);});});
 }
 module.exports={createApp,openDatabase,configFromEnv,ROUND_MS,GRACE_MS,currentRound,roundWindow};

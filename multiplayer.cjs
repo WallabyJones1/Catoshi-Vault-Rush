@@ -1,6 +1,6 @@
 'use strict';
 const crypto=require('node:crypto');
-const {HttpError,playerName}=require('./security.cjs');
+const {HttpError,playerName}=require('./mp-security.cjs');
 const {currentRound,roundWindow}=require('./periods.cjs');
 const {getTrack,publicTracks}=require('./race-tracks.js');
 

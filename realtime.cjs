@@ -5,12 +5,13 @@ const {TRACKS,getTrack}=require('./race-tracks.js');
 
 const TICK_RATE=60,SNAPSHOT_RATE=15,DT=1/TICK_RATE,DISCONNECT_GRACE_MS=20000,REPLAY_HZ=10,MAX_PROJECTILES=64;
 
-function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now}){
+function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allowRequest}){
   // Delayed require keeps the normal test suite usable before npm install.
   const {Server}=require('socket.io');
   const io=new Server(server,{
     transports:['websocket'],serveClient:true,maxHttpBufferSize:64*1024,perMessageDeflate:false,
     path:'/socket.io',pingInterval:10000,pingTimeout:12000,
+    allowRequest,
     connectionStateRecovery:{maxDisconnectionDuration:120000,skipMiddlewares:false}
   });
   const active=new Map();
