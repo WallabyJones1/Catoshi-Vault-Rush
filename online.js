@@ -128,49 +128,55 @@
       return result;
     }catch(error){if(generation===submissionGeneration){$('submission-status').textContent='Score not posted: '+error.message;$('result-quest').textContent='This run has not been added to your daily quest.';}return null;}
   }
+  // All public challenges use the branded game domain, even when a player
+  // opened the app through the Railway service URL. This is not inferred from
+  // location.origin or from the API's potentially old absolute response URL.
+  const SHARE_ORIGIN='https://vaultrush.catoshirush.fun';
   let shareGeneration=0,shareObjectUrl=null;
   function share(run,result){
     const generation=++shareGeneration,checked=result?.run,trial=run.mode==='trial';
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
     const seconds=((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3);
-    const text=trial?`${seconds}s on ${run.trial.name}. Can you beat it?`:`${score.toLocaleString()} points in Catoshi Vault Rush. Can you beat it?`;
-    // The attached picture contains the result. The caption links directly to
-    // the playable course on the host the player is actually using.
-    let url=(location.protocol==='https:'||location.protocol==='http:')?location.origin+'/'+(trial?'?trial='+run.trial.id:''):'';
-    try{if(!['https:','http:'].includes(new URL(url).protocol))url='';}catch{url='';}
-    const message=text+(url?'\n'+url:''),link=$('share-x'),save=$('save-score-picture'),preview=$('score-picture');
-    link.href='https://x.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});link.hidden=false;
-    link.textContent='POST TO X';link.onclick=null;
+    const caption=trial
+      ?`I finished ${run.trial.name} in ${seconds}s on Catoshi Vault Rush. Can you beat me?`
+      :`I scored ${score.toLocaleString()} points on Catoshi Vault Rush. Can you beat me?`;
+    const playUrl=SHARE_ORIGIN+'/'+(trial?'?trial='+encodeURIComponent(run.trial.id):'');
+    let recordPath='';
+    try{recordPath=new URL(result?.url).pathname;}catch{}
+    const expected=trial?'trial-score':'score';
+    const verified=Boolean(checked&&new RegExp('^/'+expected+'/[0-9a-f-]{36}$','i').test(recordPath));
+    // A verified result resolves to an HTML page with large-image X / Open
+    // Graph metadata. Visitors to that page can play the challenge directly.
+    const publicUrl=verified?SHARE_ORIGIN+recordPath:playUrl;
+    const link=$('share-x'),save=$('save-score-picture'),preview=$('score-picture'),native=$('share-picture');
+    // X intent cannot preattach an image. Supplying ONLY the URL parameter,
+    // not a URL embedded in `text`, prevents duplicate giant links. X fetches
+    // the 1200x630 PNG through the score page's twitter:image metadata.
+    link.href='https://x.com/intent/tweet?'+new URLSearchParams({text:caption,url:publicUrl});
+    link.hidden=false;link.textContent='POST TO X';link.onclick=null;
     if(shareObjectUrl){URL.revokeObjectURL(shareObjectUrl);shareObjectUrl=null;}
     if(save)save.hidden=true;if(preview)preview.hidden=true;
-    let file=null,pictureFailed=false;
-    link.onclick=async event=>{
-      if(!file&&!pictureFailed&&navigator.share&&navigator.canShare){
-        event.preventDefault();$('share-status').textContent='Preparing your picture… Tap again in a moment.';return;
-      }
-      if(!file||!navigator.share||!navigator.canShare?.({files:[file]})){
-        $('share-status').textContent='Save the picture to attach it in X.';return;
-      }
-      event.preventDefault();
-      try{await navigator.share({files:[file],text:message,title:'Catoshi Vault Rush'});}
-      catch(error){if(error.name!=='AbortError')$('share-status').textContent='Save the picture, then attach it in X.';}
-    };
+    if(native){native.hidden=true;native.onclick=null;}
+    $('share-status').textContent='';
+    const captionWithLink=caption+'\n'+playUrl;
     $('copy-score').onclick=async()=>{
-      try{await navigator.clipboard.writeText(message);$('share-status').textContent='Score and link copied.';}
-      catch{$('share-status').textContent=message;}
+      try{await navigator.clipboard.writeText(caption+'\n'+publicUrl);$('share-status').textContent='Score link copied.';}
+      catch{$('share-status').textContent=caption+'\n'+publicUrl;}
     };
-    // Prepare before the click: iOS sharing requires a fresh user gesture.
+    // Secondary option for players who want an actual uploaded image instead
+    // of the automatic X link card; browser share sheets let them choose X.
     (async()=>{
       let blob;
-      let recordPath='';try{recordPath=new URL(result?.url).pathname;}catch{}
-      if(checked&&/\/(?:score|trial-score)\/[0-9a-f-]{36}$/.test(recordPath)){
-        const response=await fetch(recordPath+'.png?v=2',{credentials:'omit'});
-        if(!response.ok)throw Error('Picture unavailable');blob=await response.blob();
-        if(blob.type!=='image/png')throw Error('Picture unavailable');
-      }else{
+      if(verified){
+        try{
+          const response=await fetch(recordPath+'.png?v=3',{credentials:'omit'});
+          if(response.ok){const candidate=await response.blob();if(candidate.type==='image/png')blob=candidate;}
+        }catch{}
+      }
+      if(!blob){
         const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=630;
-        const ctx=canvas.getContext('2d');if(!ctx)return;
-        const art=new Image();await new Promise((resolve,reject)=>{art.onload=resolve;art.onerror=reject;art.src='/share-art-v1.png?v=2';});
+        const ctx=canvas.getContext('2d');if(!ctx)throw Error('No canvas');
+        const art=new Image();await new Promise((resolve,reject)=>{art.onload=resolve;art.onerror=reject;art.src='/share-art-v1.png?v=3';});
         ctx.drawImage(art,0,0,1200,630,0,0,1200,630);
         const write=(value,x,y,size,color)=>{ctx.font=`700 ${size}px "Chakra Petch",sans-serif`;ctx.fillStyle=color;ctx.fillText(String(value),x,y,710);};
         write(trial?run.trial.name:'VAULT RUN',60,190,34,'#f2efe9');
@@ -180,11 +186,25 @@
         blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
       }
       if(!blob||generation!==shareGeneration)return;
-      file=new File([blob],'catoshi-score.png',{type:'image/png'});shareObjectUrl=URL.createObjectURL(blob);
-      $('share-status').textContent='';
+      shareObjectUrl=URL.createObjectURL(blob);
       if(save){save.href=shareObjectUrl;save.download='catoshi-score.png';save.hidden=false;}
       if(preview){preview.src=shareObjectUrl;preview.hidden=false;}
-    })().catch(()=>{pictureFailed=true;if(generation===shareGeneration)$('share-status').textContent='Picture unavailable. You can still share your score link.';});
+      if(native){
+        // File is only needed for the native share sheet; X's own POST button
+        // always works without it.
+        try{
+          const file=new File([blob],'catoshi-score.png',{type:'image/png'});
+          if(navigator.share&&navigator.canShare?.({files:[file]})){
+            native.hidden=false;
+            native.onclick=async()=>{
+              try{await navigator.share({files:[file],text:captionWithLink,title:'Catoshi Vault Rush'});}
+              catch(error){if(error.name!=='AbortError')$('share-status').textContent='Save the image and attach it in X instead.';}
+            };
+          }
+        }catch{}
+      }
+      $('share-status').textContent='';
+    })().catch(()=>{if(generation===shareGeneration)$('share-status').textContent='Picture unavailable. You can still post your result to X.';});
   }
   async function board(){
     const generation=++boardGeneration,round=boardRound;

@@ -12,6 +12,8 @@ const {picture}=require('./share-card.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
+// Public permalink and image previews never advertise an internal Railway host.
+const CANONICAL_SHARE_ORIGIN='https://vaultrush.catoshirush.fun';
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
 const STATIC_FILES=new Map([
@@ -189,7 +191,7 @@ function createApp(config,options={}) {
     if(typeof host!=='string'||host.includes(',')||/[\s/\\@]/.test(host))return config.origin;
     try{return new URL((config.production?'https:':'http:')+'//'+host).origin;}catch{return config.origin;}
   }
-  function shareOrigin(req){return config.shareOrigin||siteOrigin(req);}
+  function shareOrigin(req){return config.production?CANONICAL_SHARE_ORIGIN:(config.shareOrigin||siteOrigin(req));}
   function sameOrigin(req){
     const origin=req.headers.origin;
     if(origin==='null')return false;
@@ -349,10 +351,10 @@ function createApp(config,options={}) {
           res.writeHead(200,{'Content-Type':'image/png','Content-Length':content.length,'Cache-Control':'public, max-age=300'});
           res.end(req.method==='HEAD'?undefined:content);return;
         }
-        const origin=shareOrigin(req),link=origin+'/'+share[1]+'/'+record.id,image=link+'.png?v=2';
+        const origin=shareOrigin(req),link=origin+'/'+share[1]+'/'+record.id,image=link+'.png?v=3';
         const title=escapeHtml(trial?`${record.name} · ${(record.time_ms/1000).toFixed(3)}s · ${course.name}`:`${record.name} · ${record.score.toLocaleString()} points · Catoshi Vault Rush`);
         const description=escapeHtml(trial?'Chase this line in Catoshi Vault Rush.':`${record.distance}m in Catoshi Vault Rush. Can you beat it?`);
-        const meta=`<head><base href="/"><link rel="canonical" href="${escapeHtml(link)}"><meta property="og:type" content="website"><meta property="og:site_name" content="Catoshi Vault Rush"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${escapeHtml(link)}"><meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${title}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${escapeHtml(image)}"><meta name="twitter:image:alt" content="${title}">`;
+        const meta=`<head><base href="/"><link rel="canonical" href="${escapeHtml(link)}"><meta property="og:type" content="website"><meta property="og:site_name" content="Catoshi Vault Rush"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${escapeHtml(link)}"><meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:secure_url" content="${escapeHtml(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${title}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:url" content="${escapeHtml(link)}"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${escapeHtml(image)}"><meta name="twitter:image:alt" content="${title}">`;
         html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',meta).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
         // Deep links retain the trial selection when loaded as a playable page.
         if(trial)html=html.replace('<body>',`<body data-trial="${record.level}">`);
