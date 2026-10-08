@@ -36,3 +36,29 @@ test('polling matchmaking survives a long solo search and reconnect, then runs a
     assert.ok(bots.finalized);assert.ok([...bots.players.values()].every(p=>p.finishMs!==null&&!p.forfeited),'The bot race must remain playable to the finish');
   }finally{clients.forEach(s=>s.disconnect());await app.close();}
 });
+test('eight real socket sessions can jump, release, boost and finish the same live race', {timeout:20000},async()=>{
+  let clock=Date.now();const app=createApp({database:':memory:',now:()=>clock}),clients=[],tickets=[],snapshots=[];
+  await new Promise(r=>app.server.listen(0,'127.0.0.1',r));const origin='http://127.0.0.1:'+app.server.address().port;
+  async function advance(ms){clock+=ms;await pause(35);}
+  try{
+    for(let i=0;i<8;i++){
+      const response=await fetch(origin+'/'),cookie=response.headers.get('set-cookie').split(';')[0];
+      const s=io(origin,{transports:['websocket'],reconnection:false,autoConnect:false,extraHeaders:{Cookie:cookie,Origin:origin}});clients.push(s);
+      s.on('race:ticket',t=>tickets[i]=t);s.on('race:snapshot',v=>snapshots[i]=v);await connected(s);await ack(s,'queue:join',{name:'Human '+(i+1)});
+    }
+    await pause(50);assert.equal(tickets.filter(Boolean).length,8);assert.equal(new Set(tickets.map(t=>t.matchId)).size,1);
+    const m=app.realtime.active.get(tickets[0].matchId);assert.equal(m.players.size,8);clock=m.startAt;await pause(35);
+    await Promise.all(clients.map((s,i)=>ack(s,'race:input',{matchId:m.id,seq:0,type:'jumpDown'})));
+    assert([...m.players.values()].every(p=>p.run.player.held&&!p.run.player.grounded),'Each human jump reaches the authoritative simulation');
+    await advance(200);await Promise.all(clients.map(s=>ack(s,'race:input',{matchId:m.id,seq:1,type:'jumpUp'})));
+    assert([...m.players.values()].every(p=>!p.run.player.held));
+    const seq=Array(8).fill(1);
+    for(let second=0;second<100&&!m.finalized;second++){
+      await advance(1000);
+      await Promise.all(clients.map(async(s,i)=>{const p=[...m.players.values()].find(p=>p.seat===tickets[i].seat);if(p.run.boostCharges&&p.finishMs===null&&!m.finalized)await ack(s,'race:input',{matchId:m.id,seq:++seq[i],type:'boost'});}));
+    }
+    assert(m.finalized);assert([...m.players.values()].every(p=>p.finishMs!==null&&!p.forfeited));
+    assert(snapshots.every(s=>s.players.length===8&&s.players.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y))));
+    const health=await(await fetch(origin+'/health')).json();assert.equal(health.build,'downhill-22');
+  }finally{clients.forEach(s=>s.disconnect());await app.close();}
+});

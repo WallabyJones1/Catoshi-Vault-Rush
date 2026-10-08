@@ -40,4 +40,14 @@
 .multiplayer-page .rank-detail{display:block;font:10px/1.5 'Work Sans',system-ui,sans-serif;color:var(--grey);margin-top:4px}
 .multiplayer-page .board-empty{padding:22px!important;text-align:center!important;color:var(--grey)}
 .multiplayer-page .multiplayer-result h2{font:700 clamp(38px,8vw,64px)/1 var(--condensed);letter-spacing:0}
+.multiplayer-page #game-screen .game-wrap{display:flex;flex-direction:column}
+.multiplayer-page .race-standings{position:relative;inset:auto;flex:none;width:100%;padding:6px 8px;background:#17100d;border:0;border-bottom:1px solid var(--line);backdrop-filter:none;-webkit-backdrop-filter:none;contain:layout paint;pointer-events:none}
+.multiplayer-page .race-standings ol{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px}
+.multiplayer-page .race-standings li{display:flex;gap:4px;align-items:center;min-width:0;padding:5px 4px;border:1px solid transparent;border-radius:5px;font:600 10px/1.2 var(--condensed)}
+.multiplayer-page .race-standings li.you{border-color:var(--orange);background:#322016}
+.multiplayer-page .race-standings .race-name{flex:1;min-width:0;font-size:10px;letter-spacing:0}
+.multiplayer-page .race-standings .race-rank{color:var(--grey);font-size:9px}
+.multiplayer-page .race-place{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+.multiplayer-page #game-screen .multi-controls button{touch-action:none;-webkit-user-select:none;user-select:none}
+@media(max-width:600px){.multiplayer-page .race-standings ol{grid-template-columns:repeat(4,minmax(0,1fr))}.multiplayer-page .race-standings li:nth-child(n+6){display:flex}.multiplayer-page .race-standings li{min-height:23px}.multiplayer-page .race-standings .race-name{font-size:11px}.multiplayer-page .multi-controls #control-help{display:none}}
 @media(max-width:560px){.multiplayer-page #multiplayer-home{padding:20px 16px 40px}.multiplayer-page .multi-join-card{padding:18px}.multi-page-heading h2{font-size:29px}.multiplayer-page .board-toolbar{align-items:flex-start}.multiplayer-page .board-toolbar .practice-note{font-size:10px}.multiplayer-page .multi-stats div{padding:11px}.multiplayer-page .multi-stats small{font-size:8px}.multiplayer-page .mp-join-code{flex-wrap:wrap}.multiplayer-page .mp-join-code input{flex-basis:100%}.multiplayer-page .mp-join-code button{width:100%}.multiplayer-page .share-actions{flex-wrap:wrap}.multiplayer-page .share-actions>*{flex:1 1 140px}}

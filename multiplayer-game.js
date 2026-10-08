@@ -8,16 +8,16 @@
   const screens=Array.from(document.querySelectorAll('.screen'));
   const canvas=$('game'),shell=canvas.parentElement,ctx=canvas.getContext('2d');
   const STEP=1/60;
-  let run=null,renderer=null,prediction=null,remotes=null,lastSnapshotAt=0,connected=true,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,inputPointer=null,keyHeld=false,startId=0;
+  let run=null,renderer=null,prediction=null,remotes=null,localRace=null,lastSnapshotAt=0,connected=true,artwork=null,ticket=null,lastRaceMode='public',phase='menu',raf=0,last=0,accumulator=0,countdown=0,trickTime=0,hudTimer=0,inputPointer=null,keyHeld=false,startId=0;
 
   function show(id){screens.forEach(screen=>screen.classList.toggle('active',screen.id===id));}
   function setStatus(message,kind=''){window.RushMultiplayer?.setStatus?.(message,kind);}
-  function send(type){const seq=window.RushMultiplayer?.input?.(type);prediction?.record(type,seq);}
+  function send(type){if(localRace){if(type==='fire')localRace.fire();return;}const seq=window.RushMultiplayer?.input?.(type);prediction?.record(type,seq);}
   function releaseHeld(){if(run?.player.held){send('jumpUp');run.release();}}
   function releaseInput(){inputPointer=null;keyHeld=false;releaseHeld();}
-  function stopRace({forfeit=false}={}){if(forfeit&&ticket?.matchId&&phase!=='result')window.RushMultiplayer?.forfeit?.();startId++;cancelAnimationFrame(raf);releaseInput();sound.setPlaying(false);run=null;renderer=null;ticket=null;phase='menu';$('race-standings').hidden=true;window.RushMultiplayer?.leaveRaceView?.();show('multiplayer-home');window.RushMultiplayer?.returnHome?.();}
+  function stopRace({forfeit=false}={}){if(forfeit&&ticket?.matchId&&phase!=='result')window.RushMultiplayer?.forfeit?.();startId++;cancelAnimationFrame(raf);releaseInput();sound.setPlaying(false);run=null;renderer=null;localRace=null;ticket=null;phase='menu';$('race-standings').hidden=true;window.RushMultiplayer?.leaveRaceView?.();show('multiplayer-home');window.RushMultiplayer?.returnHome?.();}
   function drawLoading(){if(!ctx)return;ctx.fillStyle='#0a0908';ctx.fillRect(0,0,canvas.width,canvas.height);}
-  function resizeGame(){if(!shell?.clientWidth||!shell?.clientHeight)return;const portrait=shell.clientHeight>shell.clientWidth,width=portrait?600:960,height=Math.round(width*shell.clientHeight/shell.clientWidth);if(canvas.width===width&&canvas.height===height)return;canvas.width=width;canvas.height=height;if(renderer&&run){renderer.resize(run);renderer.draw(run);}}
+  function resizeGame(){if(!shell?.clientWidth||!shell?.clientHeight)return;const portrait=shell.clientHeight>shell.clientWidth,width=portrait?450:800,height=Math.round(width*shell.clientHeight/shell.clientWidth);if(canvas.width===width&&canvas.height===height)return;canvas.width=width;canvas.height=height;if(renderer&&run){renderer.resize(run);renderer.draw(run);}}
   function artworkReady(){if(!artwork)artwork=VaultRushRenderer.loadAssets().catch(error=>{artwork=null;throw error;});return artwork;}
 
   async function begin(multiplayerTicket){
@@ -26,7 +26,7 @@
     try{
       if(!ctx||typeof VaultRace==='undefined'||typeof VaultRushRenderer==='undefined'||typeof VaultRaceNet==='undefined')throw Error('Multiplayer game unavailable.');
       const images=await artworkReady();if(operation!==startId)return;
-      renderer=new VaultRushRenderer.Renderer(ctx,images);run=new VaultRace.RaceRun(ticket.trackId);prediction=new VaultRaceNet.Prediction(run);remotes=new VaultRaceNet.RemoteBuffer();connected=true;lastSnapshotAt=performance.now();renderer.setRaceIdentity?.({name:window.RushMultiplayer?.name?.()||'YOU',color:window.RushMultiplayer?.color?.()||'#f4c542',seat:ticket.seat});renderer.reset(run);renderer.breakout(run);renderer.draw(run);
+      renderer=new VaultRushRenderer.Renderer(ctx,images);localRace=ticket.local?new VaultBotRace.BotRace(ticket):null;run=localRace?localRace.run:new VaultRace.RaceRun(ticket.trackId);prediction=localRace?null:new VaultRaceNet.Prediction(run);remotes=new VaultRaceNet.RemoteBuffer();connected=true;lastSnapshotAt=performance.now();renderer.setRaceIdentity?.({name:ticket.name||window.RushMultiplayer?.name?.()||'YOU',color:ticket.color||window.RushMultiplayer?.color?.()||'#f4c542',seat:ticket.seat});renderer.reset(run);renderer.breakout(run);renderer.draw(run);
       const delay=ticket.startDelayMs??ticket.startAt-(ticket.serverTime??Date.now());
       phase='countdown';countdown=Math.max(.05,(delay-(performance.now()-receivedAt))/1000);accumulator=0;trickTime=0;$('countdown').textContent='READY';updateHud();sound.setPlaying(true);last=performance.now();canvas.focus({preventScroll:true});raf=requestAnimationFrame(loop);
       const latest=window.RushMultiplayer?.current?.()?.snapshot;if(latest?.matchId===ticket.matchId)multiplayerSnapshot(latest);
@@ -39,19 +39,26 @@
       renderer.handle(event);sound.effect(event);
       if(event.type==='trick'){ $('trick').textContent=event.text;if(event.points){const pts=document.createElement('small');pts.textContent='+'+event.points;$('trick').appendChild(pts);}$('trick').classList.add('visible');trickTime=1.5; }
       else if(event.type==='shot'){ $('trick').textContent='COIN SHOT · 3.5s RELOAD';$('trick').classList.add('visible');trickTime=.65; }
+      else if(event.type==='boost-ready'){$('trick').textContent='BOOST READY';$('trick').classList.add('visible');trickTime=.7;}
       else if(event.type==='rush'){ $('trick').textContent='BOOST ACTIVE';$('trick').classList.add('visible');trickTime=1; }
       else if(event.type==='respawn'){ $('trick').textContent='GAP RESET · KEEP RACING';$('trick').classList.add('visible');trickTime=1.2; }
     }
   }
   function loop(now){
-    const dt=Math.max(0,Math.min(.08,(now-last)/1000));last=now;
+    const dt=Math.max(0,Math.min(.25,(now-last)/1000));last=now;
     if(phase==='countdown'){
       countdown-=dt;$('countdown').textContent=countdown>.8?'READY':countdown>.15?'GO!':'';if(countdown<=0){phase='running';$('countdown').textContent='';accumulator=0;}
     }else if(phase==='running'){
-      if(connected&&now-lastSnapshotAt<1500){accumulator+=dt;while(accumulator>=STEP&&phase==='running'){prediction.step();handleLocalEvents();accumulator-=STEP;}$('countdown').textContent=run.finished?'FINISH!':'';}else{accumulator=0;$('countdown').textContent='RECONNECTING';}
-      trickTime-=dt;if(trickTime<=0)$('trick').classList.remove('visible');updateHud();
+      if(localRace||connected&&now-lastSnapshotAt<1500){accumulator+=dt;while(accumulator>=STEP&&phase==='running'){
+        if(localRace){localRace.step();if(localRace.tick%12===0)window.RushMultiplayer?.localSnapshot?.(localRace.snapshot());}
+        else prediction.step();handleLocalEvents();accumulator-=STEP;
+        if(localRace?.finished){window.RushMultiplayer?.localFinished?.(localRace.result());return;}
+      }$('countdown').textContent=run.finished?'FINISH!':'';}else{accumulator=0;$('countdown').textContent='RECONNECTING';}
+      trickTime-=dt;if(trickTime<=0)$('trick').classList.remove('visible');hudTimer-=dt;if(hudTimer<=0){updateHud();hudTimer=.1;}
     }
-    const remote=remotes.sample(now);renderer.setRaceEntities(remote.players.filter(p=>p.seat!==ticket.seat));renderer.setProjectiles(remote.projectiles);renderer.networkOffset=prediction.smooth(dt);
+    const alpha=phase==='running'?accumulator/STEP:1;
+    if(localRace){renderer.setRaceEntities(localRace.visualPlayers(alpha));renderer.setProjectiles(localRace.projectiles.map(q=>({...q,x:(q.previousX??q.x)+(q.x-(q.previousX??q.x))*alpha,y:(q.previousY??q.y)+(q.y-(q.previousY??q.y))*alpha})));renderer.networkOffset=null;}
+    else{const remote=remotes.sample(now);renderer.setRaceEntities(remote.players.filter(p=>p.seat!==ticket.seat));renderer.setProjectiles(remote.projectiles);renderer.networkOffset=prediction.smooth(dt);}
     renderer.update(run,dt,phase==='running'?accumulator/STEP:1);renderer.draw(run);if(['running','countdown'].includes(phase))raf=requestAnimationFrame(loop);
   }
   function press(){if(phase!=='running'||!connected||run?.player.held)return;send('jumpDown');run.press();handleLocalEvents();}
@@ -59,11 +66,11 @@
   function boost(){if(phase!=='running'||!connected||!run?.activateBoost?.())return;send('boost');handleLocalEvents();updateHud();}
 
   function multiplayerSnapshot(snapshot){
-    if(!run||!ticket||snapshot.matchId!==ticket.matchId)return;const me=snapshot.players.find(p=>p.seat===ticket.seat);
-    if(!me||!prediction.reconcile(snapshot,ticket.seat))return;
+    if(localRace||!run||!ticket||snapshot.matchId!==ticket.matchId)return;const me=snapshot.players.find(p=>p.seat===ticket.seat);
+    if(!me||!prediction.reconcile(snapshot,ticket.seat,renderer.visualPlayer,accumulator/STEP))return;
     lastSnapshotAt=performance.now();connected=true;remotes.push(snapshot,lastSnapshotAt);
     if(phase==='countdown'&&snapshot.status==='running'){phase='running';accumulator=0;last=performance.now();$('countdown').textContent='';}
-    updateHud();
+    hudTimer=0;
   }
   function multiplayerEvent(event){
     if(!renderer||!run)return;
@@ -81,7 +88,8 @@
   const playArea=$('game-screen');playArea.addEventListener('selectstart',event=>event.preventDefault());playArea.addEventListener('contextmenu',event=>event.preventDefault());
   window.addEventListener('keydown',event=>{const editing=['INPUT','TEXTAREA'].includes(event.target?.tagName)||event.target?.isContentEditable;if(editing||!['running','countdown'].includes(phase))return;if(['Space','ArrowUp','KeyW'].includes(event.code)){event.preventDefault();if(!event.repeat&&!keyHeld&&phase==='running'){keyHeld=true;press();}}else if(['KeyF','KeyX','ArrowDown'].includes(event.code)){if(!event.repeat&&phase==='running'){event.preventDefault();fire();}}else if(['KeyB','ShiftLeft','ShiftRight'].includes(event.code)){if(!event.repeat&&phase==='running'){event.preventDefault();boost();}}else if(event.code==='Escape'&&!event.repeat){event.preventDefault();stopRace({forfeit:true});}});
   window.addEventListener('keyup',event=>{if(['Space','ArrowUp','KeyW'].includes(event.code)){keyHeld=false;if(inputPointer===null)releaseHeld();}});
+  window.addEventListener('blur',releaseInput);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&phase==='running'){last=performance.now();accumulator=0;}});
 
-  window.VaultRushGame={startMultiplayer:next=>{if(phase!=='menu'&&ticket?.matchId===next?.matchId)return;begin(next);},multiplayerSnapshot,multiplayerEvent,multiplayerFinished,multiplayerInputAck:reply=>{if(!reply.ok)prediction?.reject(reply.seq);},multiplayerConnection:value=>{connected=value;if(!value){releaseInput();if(prediction)prediction.pending=[];}},returnToMenu:()=>stopRace(),mode:()=>phase};
+  window.VaultRushGame={startMultiplayer:next=>{if(phase!=='menu'&&ticket?.matchId===next?.matchId)return;begin(next);},multiplayerSnapshot,multiplayerEvent,multiplayerFinished,multiplayerInputAck:reply=>{if(!reply.ok)prediction?.reject(reply.seq);},multiplayerConnection:value=>{if(localRace)return;connected=value;if(!value){releaseInput();if(prediction)prediction.pending=[];}},returnToMenu:()=>stopRace(),mode:()=>phase};
 })();

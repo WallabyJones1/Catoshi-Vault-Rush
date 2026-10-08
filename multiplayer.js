@@ -38,11 +38,13 @@
     $('multi-queue-copy').textContent=q.size>=q.maxPlayers?'Full race found…':q.size>=q.minPlayers?(wait?'Race starts in about '+wait+'s':'Building race…'):'Waiting for another racer…';
     status(socket?.connected?'LIVE · searching for racers…':'Reconnecting…');
   }
+  const standingsNodes=new Map();
   function standings(snapshot){
     if(!snapshot)return;const list=$('race-live-list'),box=$('race-standings');if(!list||!box)return;box.hidden=false;
     const sorted=[...snapshot.players].sort((a,b)=>{if(a.finishMs!=null&&b.finishMs!=null)return a.finishMs-b.finishMs;if(a.finishMs!=null)return-1;if(b.finishMs!=null)return 1;if(a.forfeited!==b.forfeited)return a.forfeited?1:-1;return b.x-a.x||a.seat-b.seat;});
-    const you=sorted.find(p=>p.seat===currentTicket?.seat),rank=Math.max(1,sorted.indexOf(you)+1);$('race-place').textContent=rank+' / '+sorted.length;list.textContent='';
-    sorted.slice(0,8).forEach((p,i)=>{const li=document.createElement('li');if(p.seat===currentTicket?.seat)li.className='you';const r=document.createElement('span');r.textContent=i+1;const n=document.createElement('span');n.className='race-name';n.textContent=p.name+(p.seat===currentTicket?.seat?' · YOU':'');n.style.color=p.color;const d=document.createElement('span');d.className='race-distance';d.textContent=p.finishMs!=null?(p.finishMs/1000).toFixed(2)+'s':p.forfeited?'DNF':Math.floor(Math.max(0,p.x)/10)+'m';li.append(r,n,d);list.appendChild(li);});
+    const you=sorted.find(p=>p.seat===currentTicket?.seat),rank=Math.max(1,sorted.indexOf(you)+1),place=rank+' / '+sorted.length;if($('race-place').textContent!==place)$('race-place').textContent=place;
+    const visible=new Set(sorted.slice(0,8).map(p=>p.seat));for(const [seat,node]of standingsNodes)if(!visible.has(seat)){node.li.remove();standingsNodes.delete(seat);}
+    sorted.slice(0,8).forEach((p,i)=>{let node=standingsNodes.get(p.seat);if(!node){const li=document.createElement('li'),r=document.createElement('span'),n=document.createElement('span');r.className='race-rank';n.className='race-name';li.append(r,n);list.appendChild(li);node={li,r,n};standingsNodes.set(p.seat,node);}const {li,r,n}=node;li.className=p.seat===currentTicket?.seat?'you':'';li.style.order=i;const label=String(p.name||'RACER');if(n.textContent!==label)n.textContent=label;const position=String(i+1);if(r.textContent!==position)r.textContent=position;n.style.color=p.color;li.title=position+'. '+label+(p.seat===currentTicket?.seat?' · YOU':'');});
   }
   function hideStandings(){if($('race-standings'))$('race-standings').hidden=true;}
 
@@ -51,20 +53,21 @@
     if(socket)return connectedSocket(socket);
     if(typeof io!=='function')throw Error('Realtime multiplayer client did not load. Reload this page.');
     socket=io({path:'/mp/socket.io',transports:['polling','websocket'],upgrade:true,reconnection:true,reconnectionAttempts:Infinity,reconnectionDelay:500,reconnectionDelayMax:4000,timeout:15000});
-    socket.on('connect',()=>{notifyParent('catoshi:multiplayer-ready');window.VaultRushGame?.multiplayerConnection?.(true);status(queueWanted?'LIVE · matchmaking connected.':'LIVE MULTIPLAYER READY','good');if(currentTicket)socket.emit('race:resume',{matchId:currentTicket.matchId},reply=>{if(reply?.ok){currentTicket=reply.ticket;seq=Math.max(seq,(reply.ticket.nextInputSeq||0)-1);handleSnapshot(reply.snapshot);}else{currentTicket=null;window.VaultRushGame?.returnToMenu?.();status('Your previous race ended. You can race again.');}});else if(queueWanted&&!joining)joinHumans();});
-    socket.on('disconnect',()=>{if(queueActive||currentTicket)status('Connection interrupted · reconnecting…');window.VaultRushGame?.multiplayerConnection?.(false);});
-    socket.on('connect_error',e=>{notifyParent('catoshi:multiplayer-error');status('Realtime connection unavailable: '+(e.message||'retrying'),'error');});
+    socket.on('connect',()=>{notifyParent('catoshi:multiplayer-ready');window.VaultRushGame?.multiplayerConnection?.(true);status(queueWanted?'LIVE · matchmaking connected.':'LIVE MULTIPLAYER READY','good');if(currentTicket&&!currentTicket.local)socket.emit('race:resume',{matchId:currentTicket.matchId},reply=>{if(reply?.ok){currentTicket=reply.ticket;seq=Math.max(seq,(reply.ticket.nextInputSeq||0)-1);handleSnapshot(reply.snapshot);}else{currentTicket=null;window.VaultRushGame?.returnToMenu?.();status('Your previous race ended. You can race again.');}});else if(queueWanted&&!joining)joinHumans();});
+    socket.on('disconnect',()=>{if(currentTicket?.local)return;if(queueActive||currentTicket)status('Connection interrupted · reconnecting…');window.VaultRushGame?.multiplayerConnection?.(false);});
+    socket.on('connect_error',e=>{if(currentTicket?.local)return;notifyParent('catoshi:multiplayer-error');status('Realtime connection unavailable: '+(e.message||'retrying'),'error');});
     socket.on('queue:state',renderQueue);
     socket.on('lobby:state',lobbyStatus);
-    socket.on('race:ticket',ticket=>{const same=currentTicket?.matchId===ticket.matchId;lobbyStatus(null);currentTicket=ticket;seq=same?Math.max(seq,(ticket.nextInputSeq||0)-1):(ticket.nextInputSeq||0)-1;queueWanted=false;queueActive=false;renderQueue(null);status('Race found · '+ticket.trackName,'good');window.VaultRushGame?.startMultiplayer?.(ticket);});
+    socket.on('race:ticket',ticket=>{if(currentTicket?.local)return;const same=currentTicket?.matchId===ticket.matchId;lobbyStatus(null);currentTicket=ticket;seq=same?Math.max(seq,(ticket.nextInputSeq||0)-1):(ticket.nextInputSeq||0)-1;queueWanted=false;queueActive=false;renderQueue(null);status('Race found · '+ticket.trackName,'good');window.VaultRushGame?.startMultiplayer?.(ticket);});
     socket.on('race:snapshot',handleSnapshot);
-    socket.on('race:event',event=>window.VaultRushGame?.multiplayerEvent?.(event));
-    socket.on('race:finished',match=>{currentSnapshot=null;queueActive=false;window.VaultRushGame?.multiplayerFinished?.(match);decorateResult(match);refreshProfileAndBoard();});
+    socket.on('race:event',event=>{if(!currentTicket?.local)window.VaultRushGame?.multiplayerEvent?.(event);});
+    socket.on('race:finished',match=>{if(!currentTicket||currentTicket.local||(match.id||match.matchId)!==currentTicket.matchId)return;currentSnapshot=null;queueActive=false;window.VaultRushGame?.multiplayerFinished?.(match);decorateResult(match);refreshProfileAndBoard();});
     return connectedSocket(socket);
   }
-  function handleSnapshot(s){if(!s)return;currentSnapshot=s;standings(s);window.VaultRushGame?.multiplayerSnapshot?.(s);}
+  let standingsAt=0;
+  function handleSnapshot(s){if(!s||currentTicket?.local)return;currentSnapshot=s;if(performance.now()-standingsAt>180){standingsAt=performance.now();standings(s);}window.VaultRushGame?.multiplayerSnapshot?.(s);}
   function sendInput(type){if(!socket?.connected||!currentTicket)return null;const inputSeq=++seq;socket.timeout(4000).emit('race:input',{matchId:currentTicket.matchId,seq:inputSeq,type},(err,reply)=>{if(!err)window.VaultRushGame?.multiplayerInputAck?.({seq:inputSeq,ok:reply?.ok,error:reply?.error});});return inputSeq;}
-  function forfeit(){if(currentTicket&&socket)socket.emit('race:forfeit',{matchId:currentTicket.matchId},()=>{});currentTicket=null;currentSnapshot=null;hideStandings();}
+  function forfeit(){if(currentTicket&&!currentTicket.local&&socket)socket.emit('race:forfeit',{matchId:currentTicket.matchId},()=>{});currentTicket=null;currentSnapshot=null;hideStandings();}
 
   async function joinHumans(){
     if(joining)return;joining=true;let retry=false;
@@ -88,7 +91,11 @@
   function myEntry(){const name=$('multiplayer-name').value.trim()||savedName()||'Runner',color=currentColor();remember(name,color);return{name,color};}
   async function emitAck(event,data){const s=await ensureSocket();return new Promise((resolve,reject)=>s.timeout(7000).emit(event,data,(e,r)=>e?reject(Error('Connection timed out.')):r?.ok?resolve(r):reject(Error(r?.error||'Operation failed.'))));}
   async function friendAction(action,data={}){cancelQueue();try{const result=await emitAck(action,{...myEntry(),...data});if(result.lobby)lobbyStatus(result.lobby);if(action==='lobby:leave')lobbyStatus(null);return result;}catch(e){status(e.message,'error');return null;}}
-  async function startBots(){cancelQueue();const b=$('multiplayer-bots');b.disabled=true;try{await emitAck('bots:start',{...myEntry(),count:3});status('Bot race starting…','good');}catch(e){status(e.message,'error');}finally{b.disabled=false;}}
+  function startBots(){if(currentTicket&&!currentTicket.local)forfeit();cancelQueue();const tracks=window.VaultRaceTracks?.TRACKS;if(!tracks?.length){status('Reload to get the bot race update.','error');return;}
+    const choice=new Uint32Array(1);crypto.getRandomValues(choice);const track=tracks[choice[0]%tracks.length],entry=myEntry();
+    currentTicket={matchId:'local-'+Date.now(),local:true,mode:'bots',trackId:track.id,trackName:track.name,seat:0,playerCount:4,startDelayMs:1800,...entry};currentSnapshot=null;
+    window.VaultRushGame?.startMultiplayer?.(currentTicket);status('Bot race · running on your device','good');
+  }
   async function copyRoom(){const link=$('friend-room-link').value;try{if(navigator.share)await navigator.share({title:'Join my Catoshi race',text:'Join my Catoshi Vault Rush race!',url:link});else await navigator.clipboard.writeText(link);status('Invite link ready to share.','good');}catch(e){if(e.name!=='AbortError')status('Invite link: '+link);}}
   async function refreshBoard(){
     try{
@@ -119,7 +126,7 @@
     const text='I just got: #'+you.placement+' of '+match.playerCount+' on '+match.trackName+'!\n\nThink you can beat me?\n\nTry here:\n';$('share-x').href='https://x.com/intent/tweet?'+new URLSearchParams({text,url:new URL(match.replayUrl||'/',profile?.publicOrigin||location.origin).href});$('copy-score').onclick=async()=>{try{await navigator.clipboard.writeText(text+(match.replayUrl?location.origin+match.replayUrl:location.origin+'/'));$('share-status').textContent='Race result copied.';}catch{$('share-status').textContent=text;}};
   }
   async function shareReplay(path,name){const url=new URL(path,location.origin).href,text='Watch the final 5 seconds of my '+name+' race in Catoshi Vault Rush.';try{if(navigator.share){await navigator.share({title:'Catoshi Vault Rush Replay',text,url});return;}await navigator.clipboard.writeText(url);$('share-status').textContent='Replay link copied.';}catch(e){if(e?.name!=='AbortError')$('share-status').textContent=url;}}
-  function leaveRaceView(){hideStandings();currentSnapshot=null;}
+  function leaveRaceView(){hideStandings();currentSnapshot=null;if(currentTicket?.local)currentTicket=null;}
   function returnHome(){leaveRaceView();refreshProfileAndBoard();status(socket?.connected?'LIVE MULTIPLAYER READY':'Reconnecting…',socket?.connected?'good':'');}
 
   async function init(){
@@ -138,6 +145,6 @@
     refreshBoard();clearInterval(boardTimer);boardTimer=setInterval(()=>{if(!document.hidden&&$('multiplayer-home').classList.contains('active'))refreshBoard();},10000);
   }
 
-  window.RushMultiplayer={input:sendInput,forfeit,leaveRaceView,decorateResult,returnHome,setStatus:status,current:()=>({ticket:currentTicket,snapshot:currentSnapshot,profile}),color:()=>profile?.color||savedColor(),name:()=>profile?.name||savedName()};
+  window.RushMultiplayer={input:sendInput,forfeit,leaveRaceView,decorateResult,returnHome,setStatus:status,localSnapshot:standings,localFinished:match=>{window.VaultRushGame?.multiplayerFinished?.(match);decorateResult({...match,stats:profile?.stats});},current:()=>({ticket:currentTicket,snapshot:currentSnapshot,profile}),color:()=>profile?.color||savedColor(),name:()=>profile?.name||savedName()};
   init();
 })();

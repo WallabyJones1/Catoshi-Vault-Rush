@@ -13,7 +13,7 @@ const BASE=__dirname;
 const COOKIE='rush_mp_session';
 const SESSION_MS=30*86400000;
 const MIME={'.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.png':'image/png','.webp':'image/webp','.jpg':'image/jpeg','.svg':'image/svg+xml','.html':'text/html; charset=utf-8','.woff2':'font/woff2','.mp3':'audio/mpeg','.ogg':'audio/ogg','.wav':'audio/wav'};
-const STATIC=new Set(['multiplayer.html','replay.html','multiplayer.js','multiplayer-game.js','renderer.js','multiplayer-renderer.js','sound.js','audio-config.js','race-tracks.js','race-engine.js','race-net.js','replay.js','styles.css','multiplayer-lobby.css',
+const STATIC=new Set(['multiplayer.html','replay.html','multiplayer.js','multiplayer-game.js','renderer.js','multiplayer-renderer.js','sound.js','audio-config.js','race-tracks.js','race-engine.js','race-net.js','bot-race.js','replay.js','styles.css','multiplayer-lobby.css',
   ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>font+'.woff2'),
   'catoshi-clean-actions.png','catoshi-actions-extra-v1.png','catoshi-coin.png','canyon-atmosphere.png','canyon-endless-layers.png','vault-scenery-atlas.png','terrain-biomes-v1.png','terrain-obstacles-v1.png','rush-pickups-v2.png','sky-terrain-details-v1.png',
   ...['silence','burst','coin','jump','flip','metal','wood','stone','crash','land','rush','red'].map(s=>'sfx-'+s+'-v1.wav'), 'music.mp3','music.ogg','music.wav']);
@@ -52,7 +52,7 @@ function createApp({database=process.env.MP_DATABASE_PATH||process.env.DATABASE_
     try{
       if(!['GET','HEAD'].includes(req.method))throw new HttpError(405,'Method not allowed.');
       const url=new URL(req.url,'http://localhost');
-      if(url.pathname==='/health'){db.prepare('SELECT 1').get();send(res,200,{ok:true,service:'catoshi-multiplayer',version:'5.0.0',realtime:!!live});return;}
+      if(url.pathname==='/health'){db.prepare('SELECT 1').get();send(res,200,{ok:true,service:'catoshi-multiplayer',version:'5.0.0',build:'downhill-22',raceEngine:require('./race-engine.js').VERSION,realtime:!!live});return;}
       if(url.pathname.startsWith('/api/')){
         const s=ensureSession(req,res);
         throttle(req,s.id);

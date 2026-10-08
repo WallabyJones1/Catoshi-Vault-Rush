@@ -24,10 +24,10 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
   function makePlayer(row){return{session:row.session,seat:row.seat,name:row.name,color:row.color,run:new RaceRun(getTrack(row.track_id||'summit-smash').id),inputs:parseInputs(row.inputs),inputCursor:0,lastSeq:row.last_seq??parseInputs(row.inputs).length-1,lastInputAt:0,inputCount:0,connected:row.session.startsWith('bot:')||Boolean(row.connected),isBot:row.session.startsWith('bot:'),disconnectedAt:null,finishMs:row.finish_ms??null,forfeited:Boolean(row.forfeited)};}
   function parseInputs(text){try{const value=JSON.parse(text||'[]');return Array.isArray(value)?value:[];}catch{return[];}}
   function createLive(dbMatch,rows){const track=getTrack(dbMatch.track_id),m={id:dbMatch.id,track,startAt:dbMatch.start_at,deadline:dbMatch.finish_deadline,tick:0,status:'countdown',mode:dbMatch.race_type||'public',boostMask:0,players:new Map(),projectiles:[],replay:[],lastPersist:0,lastReplayTick:-1,finalized:false};for(const row of rows){row.track_id=track.id;m.players.set(row.session,makePlayer(row));}active.set(m.id,m);return m;}
-  function ticket(m,p){return{matchId:m.id,trackId:m.track.id,trackName:m.track.name,mode:m.mode||'public',finishX:m.track.finishX,startAt:m.startAt,serverTime:now(),nextInputSeq:p.lastSeq+1,seat:p.seat,playerCount:m.players.size,coinsPerShot:COINS_PER_SHOT,tickRate:TICK_RATE,snapshotRate:SNAPSHOT_RATE};}
+  function ticket(m,p){return{matchId:m.id,trackId:m.track.id,trackName:m.track.name,name:p.name,color:p.color,engineVersion:require('./race-engine.js').VERSION,mode:m.mode||'public',finishX:m.track.finishX,startAt:m.startAt,serverTime:now(),nextInputSeq:p.lastSeq+1,seat:p.seat,playerCount:m.players.size,coinsPerShot:COINS_PER_SHOT,tickRate:TICK_RATE,snapshotRate:SNAPSHOT_RATE};}
   function playerState(p){const s=p.run.snapshot();return{seat:p.seat,name:p.name,color:p.color,connected:p.connected,bot:p.isBot,inputSeq:p.lastSeq,finishMs:p.finishMs,forfeited:p.forfeited,...s};}
   function snapshot(m){return{matchId:m.id,trackId:m.track.id,trackName:m.track.name,tick:m.tick,status:m.status,serverTime:now(),startAt:m.startAt,finishX:m.track.finishX,boostMask:m.boostMask,players:[...m.players.values()].sort((a,b)=>a.seat-b.seat).map(playerState),projectiles:m.projectiles.map(q=>({id:q.id,seat:q.seat,x:q.x,y:q.y,angle:q.angle,color:q.color}))};}
-  function emitSnapshot(m){io.to('match:'+m.id).emit('race:snapshot',snapshot(m));}
+  function emitSnapshot(m){io.to('match:'+m.id).volatile.emit('race:snapshot',snapshot(m));}
   function roomBroadcast(code){for(const p of multiplayer.lobbyMembers(code)){io.to('session:'+p.session).emit('lobby:state',multiplayer.lobbyState(p.session));}}
   function queueBroadcast(){for(const row of multiplayer.queued(100)){const room='session:'+row.session;if(io.sockets.adapter.rooms.get(room)?.size)multiplayer.touchQueue(row.session);const q=multiplayer.queueState(row.session);if(q)io.to(room).emit('queue:state',q);}}
   function chooseTrack(){return TRACKS[(currentWeekIndex()+matchCounter++)%TRACKS.length];}
@@ -56,9 +56,9 @@ function attachRealtime({server,multiplayer,sessionFromRequest,now=Date.now,allo
   }
   function applyRecordedInputs(m){for(const p of m.players.values()){while(p.inputCursor<p.inputs.length&&p.inputs[p.inputCursor][0]<=m.tick){const [tick,code]=p.inputs[p.inputCursor++];if(tick===m.tick)applyInput(p,m,code,true);}}}
   function sharedInteractions(m){
-    // Contested boosts: first racer physically touching an available pickup gets it for the whole match.
+    // Every racer's RaceRun owns its ground boosts; leaders cannot consume
+    // another player's opportunities. Only coin shots are shared interactions.
     const racers=[...m.players.values()].filter(p=>!p.forfeited&&p.finishMs===null).sort((a,b)=>b.run.player.x-a.run.player.x||a.seat-b.seat);
-    for(const boost of m.track.boosts){const bit=1<<boost.id;if(m.boostMask&bit)continue;const by=m.track.boosts[boost.id];for(const p of racers){const r=p.run.player,byY=p.run.terrain(by.x)-by.yOffset;if(Math.abs(r.x-by.x)<30&&Math.abs((r.y-18)-byY)<55){if(!p.run.claimBoost())continue;m.boostMask|=bit;for(const x of m.players.values())x.run.syncBoostMask(m.boostMask);io.to('match:'+m.id).emit('race:event',{type:'boost',seat:p.seat,boostId:boost.id});break;}}}
     for(const q of m.projectiles){if(!stepCoinShot(m.track,q,DT))continue;for(const p of racers){if(p.session===q.owner||p.run.player.invulnerable>0)continue;const r=p.run.player;if(Math.abs(r.x-q.x)<32&&Math.abs((r.y-20)-q.y)<46){if(p.run.applyHit()){q.life=0;const owner=m.players.get(q.owner);if(owner)owner.run.hits++;io.to('match:'+m.id).emit('race:event',{type:'hit',from:q.seat,to:p.seat,x:r.x,y:r.y});}break;}}}
     m.projectiles=m.projectiles.filter(q=>q.life>0&&q.x<m.track.finishX+800);
   }

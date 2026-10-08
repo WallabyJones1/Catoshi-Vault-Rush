@@ -89,6 +89,7 @@
       this.clock = 0;
       this.lookAhead=0;
       this.raceEntities=[];this.raceIdentity=null;this.projectiles=[];
+      this.terrainSource=null;this.terrainView=null;this.skyCache=null;
     }
     resize(run) {
       this.width = this.ctx.canvas?.width || W;
@@ -114,6 +115,15 @@
     setRaceIdentity(identity){this.raceIdentity=identity||null;}
     setRaceEntities(entities){this.raceEntities=Array.isArray(entities)?entities:[];}
     setProjectiles(projectiles){this.projectiles=Array.isArray(projectiles)?projectiles:[];}
+    renderView(run){
+      if(this.terrainSource!==run){
+        this.terrainSource=run;const samples=new Map(),view=Object.create(run);
+        const sample=cell=>{if(!samples.has(cell))samples.set(cell,run.terrain(cell*8));return samples.get(cell);};
+        // Drawing reuses an eight-unit mesh. Physics keeps the original surface.
+        view.terrain=x=>{const cell=Math.floor(x/8),t=x/8-cell;return sample(cell)*(1-t)+sample(cell+1)*t;};
+        this.terrainView=view;
+      }return this.terrainView;
+    }
     racerLabel(name,color,x,y,portrait){
       const ctx=this.ctx,c=color||'#f4c542';ctx.save();ctx.translate(x,y);ctx.fillStyle=c;ctx.strokeStyle='rgba(10,9,8,.9)';ctx.lineWidth=2;
       ctx.beginPath();ctx.moveTo(0,7);ctx.lineTo(-5,-1);ctx.lineTo(5,-1);ctx.closePath();ctx.fill();ctx.stroke();
@@ -125,7 +135,7 @@
       for(let row=0;row<2;row++)for(let col=0;col<8;col++){ctx.fillStyle=(row+col)%2?'#0a0908':'#f2efe9';ctx.fillRect(col*13.75,-122+row*14,13.75,14);}ctx.fillStyle='#e8a13a';ctx.font='700 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('FINISH',55,-92);ctx.restore();
     }
     remoteRacers(run,left,right,portrait){
-      const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=Number.isFinite(r.y)?r.y:run.terrain(r.x),frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(r.angle||0);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
+      const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=r.grounded||!Number.isFinite(r.y)?run.terrain(r.x):r.y,angle=r.grounded?run.slope(r.x):r.angle||0,frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(angle);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
       for(const q of this.projectiles){if(q.x<left-30||q.x>right+30)continue;ctx.save();ctx.translate(q.x,q.y);ctx.rotate(q.angle||0);ctx.globalAlpha=.95;ctx.drawImage(this.images.coin,-9,-9,18,18);ctx.restore();}
     }
     burst(x, y, color, amount, strength) {
@@ -234,7 +244,7 @@
     }
     landingPoint(run,p) {
       if(p.grounded)return null;
-      for(let t=.18;t<=2.7;t+=.18){
+      for(let t=.18;t<=3.6;t+=.18){
         const x=p.x+Math.max(85,p.vx)*t,y=p.y+p.vy*t+345*t*t;
         if(run.gapAt(x))continue;
         let surface=run.terrain(x);
@@ -254,6 +264,7 @@
         this.visualPlayer.angle=old.angle+Math.atan2(Math.sin(current.angle-old.angle),Math.cos(current.angle-old.angle))*t;
       }
       if(this.networkOffset){for(const key of ['x','y','angle'])this.visualPlayer[key]+=this.networkOffset[key]||0;}
+      if(this.visualPlayer.grounded){this.visualPlayer.y=run.terrain(this.visualPlayer.x);this.visualPlayer.angle=run.slope(this.visualPlayer.x);}
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
@@ -343,13 +354,9 @@
     sky(run,transition) {
       const ctx=this.ctx,W=this.width,H=this.height,cam=this.camera;
       const tones=skies[transition.from].map((color,index)=>mixColor(color,skies[transition.to][index],transition.mix));
-      const gradient=ctx.createLinearGradient(0,0,0,H);
-      gradient.addColorStop(0,tones[0]);gradient.addColorStop(.52,tones[1]);gradient.addColorStop(1,tones[2]);
-      ctx.fillStyle=gradient;ctx.fillRect(0,0,W,H);
-      const night=(transition.from===3?1-transition.mix:0)+(transition.to===3?transition.mix:0);
-      const light=ctx.createRadialGradient(W*.74,H*.24,0,W*.74,H*.24,W*.70);
-      light.addColorStop(0,'rgba(232,161,58,'+(.07*(1-night))+')');light.addColorStop(1,'rgba(232,161,58,0)');
-      ctx.fillStyle=light;ctx.fillRect(0,0,W,H);
+      const night=(transition.from===3?1-transition.mix:0)+(transition.to===3?transition.mix:0),key=[W,H,...tones,night].join(':');
+      if(this.skyCache?.key!==key){const gradient=ctx.createLinearGradient(0,0,0,H);gradient.addColorStop(0,tones[0]);gradient.addColorStop(.52,tones[1]);gradient.addColorStop(1,tones[2]);const light=ctx.createRadialGradient(W*.74,H*.24,0,W*.74,H*.24,W*.70);light.addColorStop(0,'rgba(232,161,58,'+(.07*(1-night))+')');light.addColorStop(1,'rgba(232,161,58,0)');this.skyCache={key,gradient,light};}
+      ctx.fillStyle=this.skyCache.gradient;ctx.fillRect(0,0,W,H);ctx.fillStyle=this.skyCache.light;ctx.fillRect(0,0,W,H);
       if(night>0){
         ctx.fillStyle='#8d8880';
         for(let i=0;i<32;i++){
@@ -501,6 +508,7 @@
       ctx.restore();
     }
     draw(run) {
+      run=this.renderView(run);
       const ctx = this.ctx, p = this.visualPlayer||run.player, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W;
       this.background(run);

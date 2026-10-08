@@ -44,3 +44,24 @@ test('coin shots spin and bounce just above every sand surface, even when fired 
     assert.ok(bounced);assert.notEqual(q.angle,0);
   }
 });
+test('eight opponents move continuously through jitter, lost updates and short stalls',()=>{
+  const net=new RemoteBuffer(),packets=[];let previous=null,maxStep=0;
+  for(let tick=0;tick<900;tick++){
+    if(tick%4===0&&!(tick>300&&tick<310)){const delay=[2,8,3,12,4,6][tick/4%6];packets.push({due:tick+delay,snapshot:{tick,players:Array.from({length:8},(_,seat)=>({seat,x:tick*20+seat*12,y:tick*6,angle:0,vx:1200,vy:360,grounded:true,respawns:0})),projectiles:[]}});}
+    for(let i=packets.length-1;i>=0;i--)if(packets[i].due<=tick){net.push(packets[i].snapshot,tick/60*1000);packets.splice(i,1);}
+    const sample=net.sample(tick/60*1000);if(!sample.players.length)continue;
+    const p=sample.players[0];if(previous!==null){assert(p.x>=previous-1e-6,'Arrival jitter must not rewind opponents');maxStep=Math.max(maxStep,p.x-previous);}previous=p.x;
+    assert(sample.players.every(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)));
+  }
+  assert(maxStep<30,'No packet-sized position jumps: '+maxStep);
+  assert(previous>17000,'Interpolation must not fall increasingly behind');
+});
+test('reconciliation preserves the previous physics frame and the displayed jump',()=>{
+  const server=new RaceRun(TRACKS[0].id),client=new RaceRun(TRACKS[0].id),net=new Prediction(client);
+  for(let i=0;i<30;i++){server.step(1/60);net.step();}client.press();net.record('jumpDown',0);for(let i=0;i<6;i++)net.step();
+  const visual={x:client.previousPlayer.x,y:client.previousPlayer.y,angle:client.previousPlayer.angle};
+  net.reconcile({tick:30,players:[{seat:0,inputSeq:-1,...server.snapshot()}]},0,visual,0);
+  assert.equal(client.player.held,true);assert.equal(client.player.grounded,false);assert(client.previousPlayer.x<client.player.x);
+  assert(Math.abs(client.previousPlayer.x+net.offset.x-visual.x)<1e-6);
+  assert(Math.abs(client.previousPlayer.y+net.offset.y-visual.y)<1e-6);
+});

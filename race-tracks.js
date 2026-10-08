@@ -8,10 +8,10 @@
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
   const smooth=t=>t*t*(3-2*t);
 
-  // V7: ten distinct, finishable routes. Distances are world units (display x/10 metres).
+  // V9: ten distinct downhill routes. Distances are world units (display x/10 metres).
   // Hills alternate between crest/valley; ramps sit ahead of gap sequences to reward
   // well-timed jumps without requiring pixel-perfect timing. Missed gaps always respawn.
-  // Every course has several *contested* boost tokens; each racer can carry max 3.
+  // Every racer has their own ground boosts; each racer can carry max 3.
   // Config: id, name, biome, finishX, grade, hills, ramps, gaps, boost locations,
   // coin caches, large/small wave amplitude and track character.
   const defs=[
@@ -61,9 +61,9 @@
 
   const TRACKS=defs.map((d,index)=>{
     const {id,name,biome,finishX,grade,hills,ramps,gaps,boosts,coins,wave,style}=d;
-    const track={id,name,index,biome,finishX,grade,style,wave,
-      hills:hills.map(([f,w,h])=>({x:finishX*f,width:w,height:h})),
-      ramps:ramps.map(([f,len,height,launch],i)=>({id:i,x:finishX*f,end:finishX*f+len,recovery:finishX*f+len+260,height,launch})),
+    const track={id,name,index,biome,finishX,grade:grade+.09,style,wave:[wave[0]*1.7,wave[1]*.5],
+      hills:hills.map(([f,w,h])=>({x:finishX*f,width:w*1.15,height:h*1.7})),
+      ramps:ramps.map(([f,len,height,launch],i)=>({id:i,x:finishX*f,end:finishX*f+len*3,recovery:finishX*f+len*3+780,height:height*1.35,launch:launch*1.7})),
       gaps:gaps.map(([f,w],i)=>({id:i,x:finishX*f,end:finishX*(f+w),respawnX:finishX*(f+w)+90})),
       boosts:boosts.map((f,i)=>({id:i,x:finishX*f,yOffset:[44,54,66,44,56,70,46][i]})),
       coinClusters:[]
@@ -71,6 +71,20 @@
     // Scarce but collectible: 7 small caches, 3 or 4 coins each (24 total).
     // Ground-friendly low arcs let players earn a few carefully timed shots.
     for(let i=0;i<coins.length;i++)track.coinClusters.push({x:finishX*coins[i],count:i%3===1?4:3,spacing:36,arc:12+(i%2)*9});
+    // Frequent early launch lips between the main gap sequences; every one
+    // flows back into a broad downhill landing rather than a freestanding ramp.
+    for(const [i,f] of [.035,.095,.285,.54,.91].entries()){
+      const x=finishX*f;
+      if(track.ramps.some(r=>Math.abs(r.x-x)<1100)||track.gaps.some(g=>x>g.x-650&&x<g.end+650))continue;
+      track.ramps.push({id:track.ramps.length,x,end:x+360,recovery:x+1260,height:115+(index%3)*20,launch:280+(i%3)*45});
+    }
+    track.ramps.sort((a,b)=>a.x-b.x);
+    // Each racer owns their pickups: first place cannot remove anyone else's
+    // catch-up route. Add regular ground pads with space around the chasms.
+    for(let x=850;x<finishX-650;x+=1500+(index%3)*110){
+      if(track.gaps.some(g=>x>g.x-220&&x<g.end+220)||track.boosts.some(b=>Math.abs(b.x-x)<350))continue;
+      track.boosts.push({id:track.boosts.length,x,yOffset:22});
+    }
     return track;
   });
   const byId=new Map(TRACKS.map(t=>[t.id,t]));
@@ -92,7 +106,7 @@
   }
   function terrainAt(trackOrId,x){
     const t=typeof trackOrId==='string'?getTrack(trackOrId):trackOrId;
-    const wave=Math.sin(x/1900*TAU+t.index*.71)*t.wave[0]+Math.sin(x/620*TAU+t.index*1.17)*t.wave[1];
+    const wave=Math.sin(x/3400*TAU+t.index*.71)*t.wave[0]+Math.sin(x/1450*TAU+t.index*1.17)*t.wave[1];
     let y=220+x*t.grade+wave+hillContribution(t,x);
     for(const r of t.ramps)y-=rampLift(r,x);
     return y;
@@ -109,7 +123,7 @@
         items.push({id:'c'+coinId++,type:'coin',x,y:terrainAt(t,x)-28-arc,hit:false});
       }
     }
-    for(const boost of t.boosts){items.push({id:'b'+boost.id,type:'boost',boostIndex:boost.id,x:boost.x,y:terrainAt(t,boost.x)-boost.yOffset,hit:false,shared:true});}
+    for(const boost of t.boosts){items.push({id:'b'+boost.id,type:'boost',boostIndex:boost.id,x:boost.x,y:terrainAt(t,boost.x)-22,hit:false,shared:false});}
     return items.sort((a,b)=>a.x-b.x);
   }
   function publicTracks(){return TRACKS.map(t=>({id:t.id,name:t.name,index:t.index,biome:t.biome,finishX:t.finishX,gaps:t.gaps.length,boosts:t.boosts.length,style:t.style,coins:t.coinClusters.reduce((n,c)=>n+c.count,0)}));}

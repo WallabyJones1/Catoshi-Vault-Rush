@@ -18,7 +18,7 @@ test('all 10 fresh tracks are distinct, finishable and have sparse coins',()=>{
     assert(r.finished,`${t.id} does not reach finish`);
     assert(ticks>25*60,`${t.id} should be a meaningful race`);
     assert(Number.isFinite(terrainAt(t,t.finishX)),t.id);
-    assert(r.coinsCollected>=15,`${t.id}: ground racer should collect some coins`);
+    assert(r.coinsCollected>=5,`${t.id}: the downhill route must supply shot ammunition`);
     assert(r.respawns<=5,`${t.id}: missed jumps should not be punitive`);
     if(t.wave[0]!==TRACKS[0].wave[0])sawDifferentWave=true;
   }
