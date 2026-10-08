@@ -8,6 +8,7 @@ const {HttpError,MINT,ENGINE_VERSION,MAX_TICKS,walletAddress,playerName,hash,tok
 const {dailyQuest,syncHolderScores,publicRun,playerFilter,RUN_FIELDS}=require('./quest.cjs');
 const {checkReplay}=require('./replay-worker.cjs');
 const {TRIAL_COURSES}=require('./engine.js');
+const {picture}=require('./share-card.cjs');
 const {rewardSettings,ensureRound,publicRewards,fromRaw}=require('./rewards.cjs');
 const {ROUND_MS,currentRound,roundWindow,dayAt}=require('./periods.cjs');
 const GRACE_MS=660000,SESSION_MS=30*86400000;
@@ -25,7 +26,7 @@ const STATIC_FILES=new Map([
   ['canyon-atmosphere.png','image/png'],['canyon-endless-layers.png','image/png'],
   ['terrain-biomes-v1.png','image/png'],['terrain-obstacles-v1.png','image/png'],
   ['catoshi-actions-extra-v1.png','image/png'],['sky-terrain-details-v1.png','image/png'],
-  ['cargo-parachute-v1.png','image/png'],
+  ['cargo-parachute-v1.png','image/png'],['share-art-v1.png','image/png'],
   ['catoshi-clean-actions.png','image/png'],['vault-scenery-atlas.png','image/png']
 ]);
 function openDatabase(filename) {
@@ -68,7 +69,7 @@ function configFromEnv(env=process.env) {
   if(production&&!env.RAILWAY_VOLUME_MOUNT_PATH&&!env.DATABASE_PATH)throw new Error('Attach a persistent Railway volume, or set DATABASE_PATH on persistent storage.');
   const rewards=rewardSettings(env);
   const {vault,tokens}=rewards;
-  return {production,origin,database,vault,tokens,rewards,rpc:env.SOLANA_RPC_URL||'https://solana-rpc.publicnode.com',rpcFallback:env.SOLANA_RPC_FALLBACK_URL||(env.SOLANA_RPC_URL==='https://api.mainnet-beta.solana.com'?'https://solana-rpc.publicnode.com':'https://api.mainnet-beta.solana.com'),port:Number(env.PORT||3000)};
+  return {production,origin,shareOrigin:env.PUBLIC_ORIGIN||null,database,vault,tokens,rewards,rpc:env.SOLANA_RPC_URL||'https://solana-rpc.publicnode.com',rpcFallback:env.SOLANA_RPC_FALLBACK_URL||(env.SOLANA_RPC_URL==='https://api.mainnet-beta.solana.com'?'https://solana-rpc.publicnode.com':'https://api.mainnet-beta.solana.com'),port:Number(env.PORT||3000)};
 }
 function createApp(config,options={}) {
   const db=options.db||openDatabase(config.database),now=options.now||Date.now;
@@ -149,7 +150,7 @@ function createApp(config,options={}) {
   function ownResult(run,req,extra={}){
     const ranks=ranking(run.mode,run.mode==='holder'?run.round:-1),rank=ranks.findIndex(value=>value.id===run.id)+1;
     const progress=run.mode==='holder'?holderStatus(run.wallet,undefined,run.session):null;
-    return {run:publicRun(run),rank:rank||null,url:siteOrigin(req)+'/score/'+run.id,serverTime:now(),...(progress?{prizeEligible:Boolean(run.wallet),quota:progress.quota,best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session,dayAt(run.started)),progress,daily:progress}:{}),...extra};
+    return {run:publicRun(run),rank:rank||null,url:shareOrigin(req)+'/score/'+run.id,serverTime:now(),...(progress?{prizeEligible:Boolean(run.wallet),quota:progress.quota,best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session,dayAt(run.started)),progress,daily:progress}:{}),...extra};
   }
   function ranking(mode,round){
     return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
@@ -180,7 +181,7 @@ function createApp(config,options={}) {
   function trialResult(record,req,extra={}){
     const best=trialBest(record.wallet,record.session,record.level);
     return {run:publicTrial(record),best,rank:best?.id===record.id?best.rank:null,
-      course:trialCourse(record.level),engine:ENGINE_VERSION,url:siteOrigin(req)+'/?trial='+record.level,serverTime:now(),...extra};
+      course:trialCourse(record.level),engine:ENGINE_VERSION,url:shareOrigin(req)+'/trial-score/'+record.id,serverTime:now(),...extra};
   }
   function siteOrigin(req){
     // Use the request Host, not an arbitrary X-Forwarded-Host supplied by a client.
@@ -188,6 +189,7 @@ function createApp(config,options={}) {
     if(typeof host!=='string'||host.includes(',')||/[\s/\\@]/.test(host))return config.origin;
     try{return new URL((config.production?'https:':'http:')+'//'+host).origin;}catch{return config.origin;}
   }
+  function shareOrigin(req){return config.shareOrigin||siteOrigin(req);}
   function sameOrigin(req){
     const origin=req.headers.origin;
     if(origin==='null')return false;
@@ -336,12 +338,24 @@ function createApp(config,options={}) {
       if(!['GET','HEAD'].includes(req.method))throw new HttpError(405,'Method not allowed.');
       rate(req,'static',600);
       let filename=url.pathname==='/'?'index.html':url.pathname.slice(1),html=null;
-      const share=url.pathname.match(/^\/score\/([0-9a-f-]{36})$/);
+      const share=url.pathname.match(/^\/(score|trial-score)\/([0-9a-f-]{36})(\.png)?$/);
       if(share){
-        const run=db.prepare('SELECT * FROM runs WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL').get(share[1]);
-        if(!run)throw new HttpError(404,'Score not found.');
-        const title=escapeHtml(`${run.name} scored ${run.score.toLocaleString()} in Catoshi Vault Rush`);
-        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',`<head><base href="/"><meta property="og:title" content="${title}"><meta property="og:description" content="${run.distance}m · ${run.coins} gold · ${run.mode==='holder'?roundWindow(run.round).period:'practice'} run"><meta property="og:image" content="${siteOrigin(req)}/canyon-atmosphere.png"><meta name="twitter:card" content="summary_large_image">`).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        const trial=share[1]==='trial-score',table=trial?'trial_runs':'runs';
+        const record=db.prepare(`SELECT * FROM ${table} WHERE id=? AND submitted IS NOT NULL AND disqualified IS NULL`).get(share[2]);
+        if(!record)throw new HttpError(404,'Score not found.');
+        const course=trial?trialCourse(record.level):null;
+        if(share[3]){
+          const content=picture({...record,courseName:course?.name},trial);
+          res.writeHead(200,{'Content-Type':'image/png','Content-Length':content.length,'Cache-Control':'public, max-age=300'});
+          res.end(req.method==='HEAD'?undefined:content);return;
+        }
+        const origin=shareOrigin(req),link=origin+'/'+share[1]+'/'+record.id,image=link+'.png';
+        const title=escapeHtml(trial?`${record.name} · ${(record.time_ms/1000).toFixed(3)}s · ${course.name}`:`${record.name} · ${record.score.toLocaleString()} points · Catoshi Vault Rush`);
+        const description=escapeHtml(trial?'Chase this line in Catoshi Vault Rush.':`${record.distance}m in Catoshi Vault Rush. Can you beat it?`);
+        const meta=`<head><base href="/"><link rel="canonical" href="${escapeHtml(link)}"><meta property="og:type" content="website"><meta property="og:site_name" content="Catoshi Vault Rush"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${escapeHtml(link)}"><meta property="og:image" content="${escapeHtml(image)}"><meta property="og:image:type" content="image/png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="${title}"><meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="${title}"><meta name="twitter:description" content="${description}"><meta name="twitter:image" content="${escapeHtml(image)}"><meta name="twitter:image:alt" content="${title}">`;
+        html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8').replace('<head>',meta).replace('<title>Catoshi · Vault Rush</title>',`<title>${title}</title>`);
+        // Deep links retain the trial selection when loaded as a playable page.
+        if(trial)html=html.replace('<body>',`<body data-trial="${record.level}">`);
         filename='index.html';
       }
       if(!STATIC_FILES.has(filename))throw new HttpError(404,'Not found.');

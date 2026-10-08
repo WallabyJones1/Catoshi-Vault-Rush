@@ -267,7 +267,7 @@
     ui['result-copy'].textContent=complete?'Your fastest checked finish counts on this track’s public leaderboard.':'Jump before the red gap markers. Ride again to finish the course.';
     $('result-leaderboard').hidden=true;$('next-trial').hidden=!complete||course.id===5;
     $('result-trial-leaderboard').hidden=false;
-    $('share-actions').hidden=!complete;
+    $('share-actions').hidden=!complete;if($('score-picture'))$('score-picture').hidden=true;
     if(complete)window.RushOnline.share(run,null);
     trialMenu();show('result');
     if(!complete)return;
@@ -363,7 +363,7 @@
   $('trial-leaderboard-button').addEventListener('click',()=>window.RushOnline.openTrialBoard(selectedLevel));
   $('result-trial-leaderboard').addEventListener('click',()=>window.RushOnline.openTrialBoard(run?.trial?.id||selectedLevel));
   trialMenu();
-  const linkedTrial=Number(new URLSearchParams(location.search||'').get('trial'));
+  const linkedTrial=Number(new URLSearchParams(location.search||'').get('trial')||document.body?.dataset?.trial);
   if(courses.some(course=>course.id===linkedTrial)){selectedLevel=linkedTrial;selectMode('trial');}
   $('again').addEventListener('click',() => begin());
   $('change-wallet').addEventListener('click',backToMenu);

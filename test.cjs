@@ -491,7 +491,7 @@ test('midair flip sounds emit once per turn and mistimed flips spend one life wi
 });
 
 
-test('high auto-aligned falls survive touchdown, show one impact and do not grant rough flip bonuses',()=>{
+test('high auto-aligned falls survive touchdown and aligned flips bank their bonus',()=>{
  for(const slope of [-.5,0,.5])for(const height of [600,1800,3500]){
   const run=new Run(11);run.nextFeature=run.nextScenery=Infinity;run.items=[];run.gaps=[];run.rails=[];run.ramps=[];
   run.terrain=x=>height+x*slope;run.derivative=()=>slope;run.slope=()=>Math.atan(slope);
@@ -503,7 +503,7 @@ test('high auto-aligned falls survive touchdown, show one impact and do not gran
   if(height>=1800){assert.equal(impacts.length,1);assert(run.player.recovery>1);assert(run.player.speed>=150);}
  }
  const rough=new Run(1);Object.assign(rough.player,{airborne:2,spin:TAU,angle:0,vx:400,vy:1500,held:false});
- rough.land(200,0);assert(!rough.dead);assert(!rough.drainEvents().some(e=>/BACKFLIP/.test(e.text||'')),'rough landing does not bank a flip reward');
+ rough.land(200,0);assert(!rough.dead);assert(rough.drainEvents().some(e=>/BACKFLIP/.test(e.text||'')),'a high aligned flip banks its reward');
 });
 
 function recoveryRun(){

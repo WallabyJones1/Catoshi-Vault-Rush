@@ -8,6 +8,6 @@
   },
   "scripts": {
     "start": "node server.cjs",
-    "test": "node --test test.cjs holder.test.cjs quest.test.cjs polish.test.cjs ghost.test.cjs crosswind.test.cjs"
+    "test": "node --test test.cjs holder.test.cjs quest.test.cjs polish.test.cjs ghost.test.cjs crosswind.test.cjs flip-share.test.cjs"
   }
 }

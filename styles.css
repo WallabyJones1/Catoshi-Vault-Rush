@@ -329,3 +329,5 @@ body{min-height:100svh}button,input{font:inherit}button{cursor:pointer;border:0;
 #gate #ghost-toggle{min-height:44px;font-size:11px;margin-bottom:8px;color:var(--grey)}
 #gate #ghost-toggle[aria-pressed=true]{color:var(--cream);border-color:rgba(242,239,233,.35)}
 @media(max-width:600px){.ghost-status{max-width:40vw}.ghost-status small{font-size:9px}.ghost-status #ghost-gap{font-size:11px}}
+
+.score-picture{display:block;width:100%;max-width:440px;height:auto;margin:18px auto 12px;border:1px solid #57402c;border-radius:8px}.score-picture[hidden],#save-score-picture[hidden]{display:none!important}.share-actions{flex-wrap:wrap}#save-score-picture{text-decoration:none}

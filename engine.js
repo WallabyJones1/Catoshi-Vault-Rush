@@ -575,11 +575,16 @@
       const p = this.player;
       const impact = p.vy * Math.cos(angle) - p.vx * Math.sin(angle);
       const rotation = Math.abs(angleDelta(p.angle - angle));
+      const turns=p.airborne>.35?Math.floor(p.spin/TAU+.025):0;
+      // Fall energy and board alignment are different things. A completed,
+      // aligned flip banks its reward even after a very high jump.
+      const cleanFlip=turns>0&&rotation<=.95&&p.recovery<=0&&!p.recoveryGap;
+      const approachSpeed=Math.max(0,p.vx);
       const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
       const misaligned=p.rush<=0&&p.invulnerable<=0&&p.recovery<=0&&!p.recoveryGap&&p.airborne>.25&&p.held&&rotation>1.02;
       const badFlip=this.mode!=='trial'&&misaligned;
       p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?SPEED_LIMITS.rushFloor:115, p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing);
-      const rough=misaligned||p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
+      const rough=misaligned||!cleanFlip&&p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
       if (badFlip) {
         // A mistimed flip spends one life, just like a rock. An upright
         // automatic landing, however high, does not spend a life.
@@ -596,7 +601,7 @@
         p.recovery=Math.max(p.recovery,1.2);this.combo=1;this.slowTime=0;
         if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
         this.event('stumble',{x:p.x,y,angle,heavy:false,material:'stone',kind:'landing'});
-      }else if(p.rush<=0&&impact>650)p.speed*=.8;
+      }else if(!cleanFlip&&p.rush<=0&&impact>650)p.speed*=.8;
       p.y = y;
       p.angle = angle;
       p.grounded = true;
@@ -613,19 +618,20 @@
       }
       p.takeoffBonus=0;
       if (p.airborne > 0.35) {
-        const turns = Math.floor(p.spin / TAU + 0.025);
-        if (turns > 0 && !rough) {
+        if (cleanFlip && !rough) {
           this.combo = Math.min(8, this.combo + turns);
           const points = 500 * turns * this.combo;
           this.score += points;
-          p.speed = Math.min(p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing, p.speed + 50 * turns);
-          p.boost = 1.6;
+          p.speed = Math.min(p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing, Math.max(p.speed,approachSpeed*.9,220) + Math.min(150,50 * turns));
+          p.boost = Math.min(1.6,1+turns*.2);
+          p.stagger=0;
+          this.slowTime=Math.max(0,this.slowTime-.6);
           this.event('trick', { text: turns > 1 ? `${turns}× BACKFLIP` : 'BACKFLIP', points });
         } else if (impact < 420) {
           this.score += 100;
           this.event('trick', { text: 'CLEAN LANDING', points: 100 });
         }
-        this.event('land', { x: p.x, y: p.y, clean: impact < 500 });
+        this.event('land', { x: p.x, y: p.y, clean: cleanFlip || impact < 500 });
       }
       p.airborne = 0;
       p.spin = 0;
@@ -940,5 +946,5 @@
       }
     }
   }
-  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-15-trial-gates' };
+  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-16-flip-share' };
 });

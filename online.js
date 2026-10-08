@@ -1,7 +1,7 @@
 (function () {
   'use strict';
   const $=id=>document.getElementById(id);
-  const ENGINE='flow-web-15-trial-gates';
+  const ENGINE='flow-web-16-flip-share';
   let config=null,configPromise=null,entryWallet='',lastResult=null,boardTimer=null,boardRound=null,previousFocus=null,vaultTimer=null,boardGeneration=0;
   let submissionGeneration=0;
   async function api(endpoint,data,timeout=12000){
@@ -128,21 +128,57 @@
       return result;
     }catch(error){if(generation===submissionGeneration){$('submission-status').textContent='Score not posted: '+error.message;$('result-quest').textContent='This run has not been added to your daily quest.';}return null;}
   }
+  let shareGeneration=0,shareObjectUrl=null;
   function share(run,result){
-    const checked=result?.run;
+    const generation=++shareGeneration,checked=result?.run,trial=run.mode==='trial';
     const score=checked?.score??Math.floor(run.score),distance=checked?.distance??Math.floor(run.player.x/10);
-    const kind=checked?'checked weekly run':'score pending verification';
-    const text=run.mode==='trial'
-      ?`I finished Speed Trial ${run.trial.id}: ${run.trial.name} in ${((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3)}s in Catoshi Vault Rush! (${checked?'Replay checked':'Time pending verification'}) Can you beat it? #Catoshi`
-      :`I escaped ${distance}m with ${score.toLocaleString()} points in Catoshi Vault Rush! (${kind}) Can you beat it? #Catoshi`;
-    const url=result?.url||(location.protocol==='https:'||location.protocol==='http:'?location.origin+'/'+(run.mode==='trial'?'?trial='+run.trial.id:''):'');
-    $('share-x').href='https://twitter.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});
-    $('share-x').hidden=false;
+    const seconds=((checked?.timeMs??run.finishTime*1000)/1000).toFixed(3);
+    const text=trial?`${seconds}s on ${run.trial.name}. Your turn.`:`${score.toLocaleString()} points. ${distance}m. Your turn.`;
+    let url=result?.url||((location.protocol==='https:'||location.protocol==='http:')?location.origin+'/'+(trial?'?trial='+run.trial.id:''):'');
+    try{if(!['https:','http:'].includes(new URL(url).protocol))url='';}catch{url='';}
+    const message=text+(url?'\n'+url:''),link=$('share-x'),save=$('save-score-picture'),preview=$('score-picture');
+    link.href='https://x.com/intent/tweet?'+new URLSearchParams({text,...(url?{url}:{})});link.hidden=false;
+    link.textContent='SHARE SCORE ↗';link.onclick=null;
+    if(shareObjectUrl){URL.revokeObjectURL(shareObjectUrl);shareObjectUrl=null;}
+    if(save)save.hidden=true;if(preview)preview.hidden=true;
+    let file=null;
+    link.onclick=async event=>{
+      if(!file||!navigator.share||!navigator.canShare?.({files:[file]})){
+        $('share-status').textContent='Save the picture to attach it in X.';return;
+      }
+      event.preventDefault();
+      try{await navigator.share({files:[file],text:message,title:'Catoshi Vault Rush'});}
+      catch(error){if(error.name!=='AbortError')$('share-status').textContent='Save the picture, then attach it in X.';}
+    };
     $('copy-score').onclick=async()=>{
-      const message=text+(url?' '+url:'');
       try{await navigator.clipboard.writeText(message);$('share-status').textContent='Score and link copied.';}
       catch{$('share-status').textContent=message;}
     };
+    // Prepare before the click: iOS sharing requires a fresh user gesture.
+    (async()=>{
+      let blob;
+      if(checked&&/\/(?:score|trial-score)\/[0-9a-f-]{36}$/.test(new URL(url).pathname)){
+        const response=await fetch(new URL(url).pathname+'.png',{credentials:'omit'});
+        if(!response.ok)throw Error('Picture unavailable');blob=await response.blob();
+        if(blob.type!=='image/png')throw Error('Picture unavailable');
+      }else{
+        const canvas=document.createElement('canvas');canvas.width=1200;canvas.height=630;
+        const ctx=canvas.getContext('2d');if(!ctx)return;
+        const art=new Image();await new Promise((resolve,reject)=>{art.onload=resolve;art.onerror=reject;art.src='/share-art-v1.png';});
+        ctx.drawImage(art,0,0,1200,630,0,0,1200,630);
+        const write=(value,x,y,size,color)=>{ctx.font=`700 ${size}px "Chakra Petch",sans-serif`;ctx.fillStyle=color;ctx.fillText(String(value),x,y,710);};
+        write(trial?'SPEED TRIAL '+run.trial.id:'VAULT RUN',60,178,26,'#f26b35');
+        write(($('holder-name')?.value||'CATOSHI').slice(0,20),60,232,36,'#f2efe9');
+        write(trial?seconds+'s':score.toLocaleString(),60,360,98,'#f26b35');
+        write(trial?run.trial.name:'POINTS',60,420,30,'#f2efe9');
+        write(trial?'TIME PENDING':distance+'m / SCORE PENDING',60,477,23,'#8d8880');
+        blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/png'));
+      }
+      if(!blob||generation!==shareGeneration)return;
+      file=new File([blob],'catoshi-score.png',{type:'image/png'});shareObjectUrl=URL.createObjectURL(blob);
+      if(save){save.href=shareObjectUrl;save.download='catoshi-score.png';save.hidden=false;}
+      if(preview){preview.src=shareObjectUrl;preview.hidden=false;}
+    })().catch(()=>{if(generation===shareGeneration)$('share-status').textContent='Picture unavailable. You can still share your score link.';});
   }
   async function board(){
     const generation=++boardGeneration,round=boardRound;
