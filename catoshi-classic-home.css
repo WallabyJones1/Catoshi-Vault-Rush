@@ -1,0 +1,282 @@
+/* Catoshi Classic Homepage Restore V8 — recovered V18 homepage CSS.
+   This file loads AFTER styles.css. It targets #gate and does not overwrite
+   Vault Run physics, Speed Trial logic or multiplayer gameplay styling. */
+
+/* Catoshi website lobby theme. Scoped so gameplay and race controls keep their sizing. */
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:600;font-display:swap;src:url('chakra-petch-600.woff2') format('woff2')}
+@font-face{font-family:'Chakra Petch';font-style:normal;font-weight:700;font-display:swap;src:url('chakra-petch-700.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:400;font-display:swap;src:url('work-sans-400.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:500;font-display:swap;src:url('work-sans-500.woff2') format('woff2')}
+@font-face{font-family:'Work Sans';font-style:normal;font-weight:600;font-display:swap;src:url('work-sans-600.woff2') format('woff2')}
+#gate{
+  --black:#080707;--orange:#f25e30;--cream:#eee8e8;--grey:#958787;
+  --line:#2b2121;--condensed:'Chakra Petch','Work Sans',system-ui,sans-serif;
+  --home-body:'Work Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
+  --home-accent-hi:#f9a074;--home-sunken:#1b1515;
+  padding:24px 32px 32px;background:var(--black);color:var(--cream);
+  font:400 16px/1.6 var(--home-body);-webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;overscroll-behavior:contain;
+}
+#gate .gate-landscape{
+  position:fixed;background:radial-gradient(ellipse at 80% 40%,rgba(242,94,48,.13),transparent 60%);
+  opacity:1;pointer-events:none;
+}
+#gate .home-banner{
+  max-width:1116px;min-height:56px;margin:0 auto 42px;padding-bottom:16px;
+  border-bottom:1px solid var(--line);align-items:center;
+}
+#gate .wordmark{
+  margin:0;font:700 24px/1 var(--condensed);letter-spacing:-.01em;white-space:nowrap;
+  display:inline-flex;align-items:center;min-height:44px;color:var(--cream);text-decoration:none;
+}
+#gate .wordmark:focus-visible{outline:2px solid var(--orange);outline-offset:4px;border-radius:3px}
+#gate .wordmark span{color:var(--orange);text-shadow:0 0 14px rgba(242,94,48,.55)}
+#gate .prize-banner{
+  padding:8px 14px;max-width:60%;border:1px solid rgba(242,94,48,.35);
+  border-radius:10px;background:rgba(242,94,48,.06);
+}
+#gate .prize-banner span{font:600 10px/1.4 var(--condensed);letter-spacing:.14em;color:var(--grey)}
+#gate .prize-banner strong{font:700 24px/1.1 var(--condensed);font-variant-numeric:tabular-nums;color:var(--home-accent-hi)}
+#gate .gate-card{
+  display:grid;grid-template-columns:minmax(0,1.15fr) minmax(320px,.85fr);
+  grid-template-rows:auto auto 1fr;column-gap:56px;align-items:start;
+  width:min(100%,1116px);margin:0 auto auto;padding:0;flex-shrink:0;
+}
+#gate .brand-lockup{
+  grid-column:1;grid-row:1;grid-template-columns:minmax(0,1fr) minmax(140px,44%);
+  gap:12px;align-items:center;min-height:248px;background:none;
+}
+#gate .brand-lockup h1{
+  font:700 clamp(48px,6.4vw,88px)/.95 var(--condensed);letter-spacing:.005em;
+  text-transform:uppercase;text-wrap:balance;
+}
+#gate .brand-lockup h1 span{color:var(--orange);text-shadow:0 0 28px rgba(242,94,48,.4)}
+#gate .home-mascot{width:100%;max-width:260px;justify-self:end;align-self:center}
+#gate .home-mascot #home-catoshi{width:100%;height:auto;max-width:none}
+#gate .lede{
+  grid-column:1;grid-row:2;margin:22px 0 0;color:var(--grey);
+  font:400 17px/1.6 var(--home-body);max-width:520px;
+}
+#gate #holder-entry{
+  grid-column:2;grid-row:1/4;margin:0;padding:24px;border-radius:16px;
+  border:1px solid rgba(242,94,48,.35);
+  background:linear-gradient(150deg,rgba(242,94,48,.12),rgba(242,94,48,.02) 55%),var(--home-sunken);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 30px 80px rgba(0,0,0,.35),0 0 50px rgba(242,94,48,.06);
+}
+#gate .entry-meta{
+  display:flex;align-items:center;gap:8px;font:600 11px/1.5 var(--condensed);
+  letter-spacing:.12em;color:var(--home-accent-hi);margin:0 0 24px;
+}
+#gate .entry-meta span{margin:0;color:var(--grey)}
+#gate .holder-name-field{margin-top:0}
+#gate .player-field{margin-bottom:18px}
+#gate .player-field label{
+  display:flex;align-items:baseline;justify-content:space-between;gap:12px;
+  margin-bottom:8px;font:600 12px/1.5 var(--condensed);letter-spacing:.08em;color:var(--cream);
+}
+#gate .player-field label span{float:none;font:500 10px/1.5 var(--home-body);letter-spacing:.04em;color:var(--grey)}
+#gate input{
+  border:1px solid var(--line);border-radius:10px;background:var(--black);
+  height:50px;padding:12px 14px;color:var(--cream);font:400 16px var(--home-body);
+}
+#gate #wallet{font:400 16px var(--mono)}
+#gate input::placeholder{color:#8b7f7f;opacity:1}
+#gate input:focus-visible,#gate button:focus-visible,#gate summary:focus-visible{
+  outline:2px solid var(--orange);outline-offset:3px;
+}
+#gate button{
+  font:600 14px/1.3 var(--condensed);letter-spacing:.06em;text-transform:uppercase;
+  min-height:50px;padding:14px 18px;border-radius:10px;
+  transition:filter .15s,border-color .15s,color .15s;
+}
+#gate #verify-button{
+  margin-top:4px;color:#fff;background-color:var(--orange);letter-spacing:.02em;
+  background-image:linear-gradient(rgba(255,255,255,0),rgba(255,255,255,.07));
+  text-shadow:0 1px 2.3px rgba(0,0,0,.18);
+  box-shadow:0 1px 2px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.2),inset 0 -1px rgba(255,255,255,.15),inset 0 -1px 5px rgba(255,255,255,.25),inset 0 1px rgba(255,255,255,.17);
+}
+#gate #verify-button:hover{filter:brightness(1.06)}
+#gate .ghost{background:transparent;border:1px solid var(--line);color:var(--cream)}
+#gate .ghost:hover{border-color:#8b7f7f;color:var(--home-accent-hi)}
+#gate .multiplayer-cta{
+  border:1px solid rgba(242,94,48,.6);background:rgba(242,94,48,.1);color:var(--cream);
+  box-shadow:0 0 18px rgba(242,94,48,.08);flex-wrap:wrap;gap:5px 10px;
+}
+#gate .multiplayer-cta:hover{border-color:var(--orange);background:rgba(242,94,48,.18)}
+#gate .multiplayer-cta span{color:var(--home-accent-hi);font:500 10px/1.5 var(--home-body)}
+#gate #leaderboard-button{padding-inline:18px}
+#gate #check-day{border:0;font:600 11px var(--condensed);color:var(--grey);min-height:44px;margin-top:6px}
+#gate .status,#gate .practice-note{font:400 13px/1.6 var(--home-body)}
+#gate .status.success{color:var(--green)}
+#gate .status.error{color:var(--red)}
+#gate .quest-card{border-radius:10px;border-color:var(--line);background:rgba(8,7,7,.55);padding:16px}
+#gate summary{font:600 12px/1.5 var(--condensed);letter-spacing:.08em}
+#gate .quest-heading{font:600 12px var(--condensed)}
+#gate .menu-controls{width:100%;max-width:1116px;align-self:center;margin:24px auto 0;font:500 11px var(--home-body);letter-spacing:.06em}
+@media(max-width:800px){
+  #gate{padding:20px 24px 28px}
+  #gate .home-banner{margin-bottom:24px}
+  #gate .gate-card{display:flex;flex-direction:column;width:min(100%,540px);margin:0 auto auto}
+  #gate .brand-lockup{width:100%;min-height:180px;grid-template-columns:minmax(0,1fr) minmax(130px,42%);gap:12px}
+  #gate .brand-lockup h1{font-size:clamp(50px,10vw,76px)}
+  #gate .home-mascot{max-width:220px}
+  #gate .lede{font-size:15px;line-height:1.6;margin:12px 0 24px}
+  #gate #holder-entry{width:100%;padding:22px}
+  #gate .menu-controls{max-width:540px}
+}
+@media(max-width:400px){
+  #gate{padding:16px 18px 24px}
+  #gate .wordmark{font-size:21px}
+  #gate .prize-banner{padding:7px 10px}
+  #gate .prize-banner span{font-size:8px}
+  #gate .prize-banner strong{font-size:21px}
+  #gate .brand-lockup{min-height:154px;grid-template-columns:minmax(0,1fr) minmax(110px,42%)}
+  #gate .brand-lockup h1{font-size:clamp(43px,12.5vw,50px)}
+  #gate #holder-entry{padding:18px}
+  #gate .entry-meta{font-size:10px;letter-spacing:.08em}
+}
+@media(orientation:landscape) and (max-height:600px) and (min-width:801px){
+  #gate .home-banner{margin-bottom:20px}
+  #gate .brand-lockup{min-height:180px}
+  #gate .brand-lockup h1{font-size:64px}
+  #gate .home-mascot{max-width:180px}
+}
+@media(prefers-reduced-motion:reduce){#gate button{transition:none}}
+
+
+/* Single-player mode choice; existing lobby typography and palette stay intact. */
+#gate .mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:4px;border:1px solid var(--line);border-radius:12px;margin-bottom:20px;background:var(--black)}
+#gate .mode-switch button{min-height:44px;padding:10px 8px;background:transparent;color:var(--grey);font-size:12px;border:1px solid transparent}
+#gate .mode-switch button[aria-pressed=true]{background:rgba(242,94,48,.12);border-color:rgba(242,94,48,.35);color:var(--cream)}
+#gate .trial-intro{font:400 13px/1.6 var(--home-body);color:var(--grey);margin:0 0 14px}
+#gate .trial-levels{display:grid;gap:7px;margin-bottom:12px}
+#gate .trial-level{display:flex;flex-direction:column;align-items:flex-start;gap:5px;width:100%;min-height:56px;padding:10px 13px;background:var(--black);color:var(--cream);border:1px solid var(--line)}
+#gate .trial-level strong{font:600 12px var(--condensed);letter-spacing:.06em}
+#gate .trial-level small{font:10px var(--mono);color:var(--grey)}
+#gate .trial-level[aria-pressed=true]{border-color:var(--orange);background:rgba(242,94,48,.09)}
+#gate #trial-target{font:10px/1.8 var(--mono);color:var(--gold);margin:14px 0}
+#gate .trials-selected .entry-meta,#gate .trials-selected #holder-best,#gate .trials-selected #check-day,#gate .trials-selected #holder-daily,#gate .trials-selected #leaderboard-button{display:none}
+#gate #trial-leaderboard-button{margin-bottom:20px}
+
+/*
+ * Catoshi Vault Rush — main-menu Speed Trials layout repair (2026-10-08)
+ * Add AFTER styles.css. Scoped to the gate so game/rendering and multiplayer CSS are untouched.
+ */
+#gate .mode-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: stretch;
+  width: 100%;
+  gap: 5px;
+  padding: 4px;
+  margin-bottom: 20px;
+  border: 1px solid var(--line, #443a33);
+  border-radius: 12px;
+  background: var(--black, #100d0c);
+  box-sizing: border-box;
+}
+#gate .mode-switch:has(> #mode-multiplayer) {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#gate .mode-switch > button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 9px 5px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--grey, #a49d96);
+  font: 600 clamp(10px, 2.4vw, 12px)/1.25 var(--condensed, system-ui, sans-serif);
+  letter-spacing: 0.015em;
+  text-align: center;
+  overflow-wrap: anywhere;
+  box-sizing: border-box;
+}
+#gate .mode-switch > button[aria-pressed="true"] {
+  background: rgba(242, 94, 48, 0.14);
+  border-color: rgba(242, 94, 48, 0.48);
+  color: var(--cream, #f2efe9);
+}
+#gate .trial-intro {
+  margin: 0 0 14px;
+  font: 400 13px/1.6 var(--home-body, system-ui, sans-serif);
+  color: var(--grey, #a49d96);
+}
+#gate .trial-levels {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  width: 100%;
+  gap: 7px;
+  margin: 0 0 14px;
+}
+#gate .trial-levels > .trial-level {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  text-align: left;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  min-height: 60px;
+  height: auto;
+  margin: 0;
+  padding: 11px 14px;
+  border: 1px solid var(--line, #443a33);
+  border-radius: 9px;
+  background: var(--black, #100d0c);
+  color: var(--cream, #f2efe9);
+  font: 600 12px/1.3 var(--condensed, system-ui, sans-serif);
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+#gate .trial-levels > .trial-level strong {
+  display: block;
+  max-width: 100%;
+  font: 600 14px/1.25 var(--condensed, system-ui, sans-serif);
+  letter-spacing: 0.05em;
+  text-align: left;
+}
+#gate .trial-levels > .trial-level small {
+  display: block;
+  max-width: 100%;
+  font: 400 11px/1.35 var(--mono, monospace);
+  color: var(--grey, #a49d96);
+  text-align: left;
+}
+#gate .trial-levels > .trial-level[aria-pressed="true"] {
+  background: rgba(242, 94, 48, 0.10);
+  border-color: var(--orange, #f26b35);
+}
+#gate #trial-menu[hidden],
+#gate #ghost-toggle[hidden],
+#gate #trial-leaderboard-button[hidden] { display: none !important; }
+#gate #trial-target { font: 400 11px/1.65 var(--mono, monospace); }
+#gate #ghost-toggle,
+#gate #trial-leaderboard-button {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--cream, #f2efe9);
+  border: 1px solid var(--line, #443a33);
+  font: 600 13px/1.3 var(--condensed, system-ui, sans-serif);
+  box-sizing: border-box;
+}
+@media (max-width: 420px) {
+  #gate .mode-switch > button { font-size: 10px; padding-inline: 3px; }
+  #gate .trial-levels > .trial-level { padding: 10px 12px; }
+}
+
+/* In-page multiplayer visual shell; kept isolated from solo gameplay. */
+#gate .mode-switch:has(> #mode-multiplayer) {grid-template-columns:repeat(3,minmax(0,1fr));}
+.multiplayer-embedded{position:fixed;inset:0;z-index:9999;background:#0a0807;color:#f4e6d9;display:flex;flex-direction:column}
+.multiplayer-embedded[hidden]{display:none!important}
+.multiplayer-embedded-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;min-height:52px;padding:9px max(12px,env(safe-area-inset-right));border-bottom:1px solid #493022;background:#17100c;font-weight:700;font-size:13px;letter-spacing:.04em}
+.multiplayer-embedded-bar button{min-height:36px;border:1px solid #9e603a;background:transparent;color:#ffad73;border-radius:8px;padding:6px 12px;cursor:pointer}
+#multiplayer-iframe{width:100%;height:100%;min-height:0;flex:1;border:0;background:#0a0908}
+.multiplayer-embed-status{position:absolute;top:53px;right:12px;font-size:11px;pointer-events:none;color:#f8bd91}
