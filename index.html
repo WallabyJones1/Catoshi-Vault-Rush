@@ -17,6 +17,7 @@
   <script defer src="sound.js?v=single-player-polish-12"></script>
   <script defer src="home.js?v=web-11-terrain-weekly-1"></script>
   <script defer src="online.js?v=canonical-share-18"></script>
+  <script defer src="mp-tab.js?v=1"></script>
   <script defer src="game.js?v=flip-share-16"></script>
 </head>
 <body>
@@ -28,7 +29,7 @@
         <div class="brand-lockup"><h1 id="gate-title">VAULT<br><span>RUSH</span></h1><div id="home-mascot" class="home-mascot"><img id="home-catoshi" src="catoshi-home-v2.gif?v=guest-home-3" width="320" height="320" alt="Catoshi balancing, blinking and waving on her gold token" fetchpriority="high"><canvas id="home-catoshi-animation" width="320" height="320" aria-hidden="true" hidden></canvas></div></div>
         <p class="lede">Take the gold. Ride the hills.<br>Make the landing.</p>
         <section id="holder-entry" aria-label="Free entry">
-          <div class="mode-switch" role="group" aria-label="Game mode"><button id="mode-vault" type="button" aria-pressed="true">VAULT RUN</button><button id="mode-trial" type="button" aria-pressed="false">SPEED TRIALS</button></div>
+          <div class="mode-switch" role="group" aria-label="Game mode"><button id="mode-vault" type="button" aria-pressed="true">VAULT RUN</button><button id="mode-trial" type="button" aria-pressed="false">SPEED TRIALS</button><button id="mode-multiplayer" type="button" aria-pressed="false" aria-controls="multiplayer-embedded">MULTIPLAYER</button></div>
           <div id="trial-menu" hidden><p class="trial-intro">Five fixed tracks. Three lives. Chase the fastest line.</p><div id="trial-levels" class="trial-levels" role="group" aria-label="Choose a Speed Trial level"></div><p id="trial-target" class="practice-note"></p><button id="ghost-toggle" class="ghost" type="button" aria-pressed="true">FASTEST GHOST · ON</button><button id="trial-leaderboard-button" class="ghost" type="button">TRACK LEADERBOARDS ↗</button></div>
           <p class="entry-meta">FREE PLAY <span>·</span> UNLIMITED RUNS</p>
           <p id="holder-best" class="practice-note"></p>
@@ -49,6 +50,12 @@
         </section>
       </div>
       <p class="menu-controls">TAP TO JUMP <span>·</span> HOLD IN AIR TO FLIP</p>
+    </section>
+
+    <section id="multiplayer-embedded" class="multiplayer-embedded" hidden aria-label="Multiplayer racing">
+      <div class="multiplayer-embedded-bar"><strong>CATOSHI · MULTIPLAYER</strong><button id="multiplayer-close" type="button" aria-label="Return to main game">← BACK TO GAME</button></div>
+      <p id="multiplayer-embed-status" role="status" class="multiplayer-embed-status">Connecting to multiplayer…</p>
+      <iframe id="multiplayer-iframe" title="Catoshi multiplayer racing" src="about:blank" allow="fullscreen" referrerpolicy="strict-origin-when-cross-origin"></iframe>
     </section>
 
     <section id="game-screen" class="screen" aria-label="Vault Rush downhill game">

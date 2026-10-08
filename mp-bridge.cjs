@@ -36,7 +36,7 @@ function forward(req,res){
   return true;
 }
 function proxyUpgrade(req,socket,head){
-  if(!isMpRoute(req.url))return; // Do not interfere with solo or other WebSocket routes
+  if(!isMpRoute(req.url))return socket.destroy();
   socket.setTimeout(12000,()=>socket.destroy());
   const upstream=net.connect({host:'127.0.0.1',port});
   upstream.once('connect',()=>{
@@ -58,7 +58,7 @@ function launch(){
   if(closing||process.env.MP_ENABLED==='false')return;
   try{
     const env={...process.env,PORT:String(port),MP_HOST:'127.0.0.1',MP_DATABASE_PATH:process.env.MP_DATABASE_PATH||path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH||path.dirname(process.env.DATABASE_PATH||'./data/catoshi.sqlite'),'catoshi-multiplayer.sqlite')};
-    child=fork(path.join(__dirname,'mp','multiplayer-server.cjs'),[],{env,stdio:['ignore','inherit','inherit','ipc']});
+    child=fork(path.join(__dirname,'multiplayer-server.cjs'),[],{env,stdio:['ignore','inherit','inherit','ipc']});
     const running=child;
     child.on('exit',(code,signal)=>{
       if(child===running)child=null;

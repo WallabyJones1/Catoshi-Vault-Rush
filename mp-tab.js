@@ -23,7 +23,7 @@
    if(new URLSearchParams(location.search).has('race')){
      const url=new URL(location.href);url.searchParams.delete('race');history.replaceState(history.state,'',url.pathname+url.search+url.hash);
    }
-   document.getElementById('mode-vault')?.focus({preventScroll:true});
+   button.focus({preventScroll:true});
  }
  button.addEventListener('click',()=>show());close.addEventListener('click',hide);
  window.addEventListener('message',event=>{
