@@ -286,6 +286,7 @@
       const body=$('trial-board-rows');body.textContent='';
       for(const entry of value.entries){
         const row=document.createElement('tr'),rank=document.createElement('td'),name=document.createElement('td'),time=document.createElement('td');
+        if(entry.rank<=3)row.classList.add('podium-row','podium-'+entry.rank);
         const badge=document.createElement('span');badge.className='rank-badge';badge.textContent=entry.rank;rank.appendChild(badge);
         const title=document.createElement('strong');title.className='rank-name';title.textContent=entry.name;name.appendChild(title);
         if(entry.wallet){const detail=document.createElement('small');detail.className='rank-detail rank-wallet';detail.textContent=entry.wallet;name.appendChild(detail);}

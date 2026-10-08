@@ -10,7 +10,7 @@
   <link rel="preload" href="chakra-petch-700.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="work-sans-400.woff2" as="font" type="font/woff2" crossorigin>
   <meta name="catoshi-build" content="site-repair-20">
-  <link rel="stylesheet" href="styles.css?v=site-repair-20">
+  <link rel="stylesheet" href="styles.css?v=results-ui-21">
   <link rel="stylesheet" href="catoshi-classic-home.css?v=site-repair-20">
   <script defer src="engine.js?v=site-repair-20"></script>
   <script defer src="ghost.js?v=site-repair-20"></script>
@@ -18,7 +18,7 @@
   <script defer src="audio-config.js?v=site-repair-20"></script>
   <script defer src="sound.js?v=site-repair-20"></script>
   <script defer src="home.js?v=site-repair-20"></script>
-  <script defer src="online.js?v=site-repair-20"></script>
+  <script defer src="online.js?v=results-ui-21"></script>
   <script defer src="mp-tab.js?v=site-repair-20"></script>
   <script defer src="game.js?v=site-repair-20"></script>
 </head>
@@ -108,7 +108,7 @@
         <p id="result-copy" class="practice-note">Your best checked run counts on the weekly leaderboard.</p>
         <p id="submission-status" class="status" role="status" aria-live="polite"></p>
         <button id="retry-trial" class="ghost" type="button" hidden>RETRY POSTING TIME</button>
-        <img id="score-picture" class="score-picture" alt="Your Catoshi score picture" hidden><div id="share-actions" class="share-actions"><a id="share-x" class="share-link" href="https://x.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST TO X</a><button id="share-picture" class="ghost" type="button" hidden>SHARE PICTURE</button><a id="save-score-picture" class="ghost" download="catoshi-score.png" hidden>SAVE IMAGE</a><button id="copy-score" class="ghost" type="button" hidden>COPY</button></div>
+        <img id="score-picture" class="score-picture" width="1200" height="630" alt="Your Catoshi score picture" hidden><div id="share-actions" class="share-actions"><a id="share-x" class="share-link" href="https://x.com/intent/tweet" target="_blank" rel="noopener noreferrer">POST TO X</a><button id="share-picture" class="ghost" type="button" hidden>SHARE PICTURE</button><a id="save-score-picture" class="ghost" download="catoshi-score.png" hidden>SAVE IMAGE</a><button id="copy-score" class="ghost" type="button" hidden>COPY</button></div>
         <button id="result-leaderboard" class="ghost" type="button">LIVE LEADERBOARD</button>
         <button id="result-trial-leaderboard" class="ghost" type="button" hidden>TRACK LEADERBOARD</button>
         <p id="share-status" class="status" role="status"></p>
@@ -128,9 +128,10 @@
     <section id="trial-board-panel" class="leaderboard-panel" role="dialog" aria-modal="true" aria-labelledby="trial-board-title" hidden>
       <div class="board-card">
         <div class="board-heading"><div><p class="eyebrow">SPEED TRIALS</p><h2 id="trial-board-title">BEST TIMES</h2></div><button id="close-trial-board" class="ghost" type="button" aria-label="Close track leaderboard">×</button></div>
-        <div id="trial-board-tabs" class="trial-board-tabs" role="group" aria-label="Choose track leaderboard"></div>
+        <div class="board-prize-line"><span>TOP TIMES <small>FIVE TRACKS</small></span><small>BEST FINISH COUNTS</small></div>
+        <div id="trial-board-tabs" class="board-tabs trial-board-tabs" role="group" aria-label="Choose track leaderboard"></div>
         <div class="board-toolbar"><p id="trial-board-course" class="practice-note"></p><button id="trial-board-refresh" class="ghost" type="button">REFRESH</button></div>
-        <p class="practice-note">FASTEST CHECKED FINISH PER PLAYER</p>
+        <p class="practice-note board-explainer">FASTEST FINISH PER PLAYER</p>
         <table class="rankings trial-rankings"><thead><tr><th scope="col">#</th><th scope="col">PLAYER</th><th scope="col">TIME</th></tr></thead><tbody id="trial-board-rows"></tbody></table>
         <p id="trial-board-status" class="status" role="status" aria-live="polite">Loading times…</p>
       </div>
