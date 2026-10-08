@@ -17,11 +17,9 @@
     obstacles: 'terrain-obstacles-v1.png',
     rush: 'rush-pickups-v2.png',
     extras: 'catoshi-actions-extra-v1.png',
-    details: 'sky-terrain-details-v1.png',
-    cargo: 'cargo-parachute-v1.png'
+    details: 'sky-terrain-details-v1.png'
   };
-  const optionalAssets = new Set(['extras','details','cargo']);
-  const cargoParts = [[45,181,702,371],[848,239,344,317],[42,871,719,230],[838,809,380,299]];
+  const optionalAssets = new Set(['extras','details']);
   // Supplemental atlas crops are generated from the measured alpha bounds.
   const extraCharacters = [[20,75,344,305],[404,75,344,305],[788,112,344,268],[1172,35,344,345],[42,420,300,360],[404,425,344,355],[788,450,344,330],[1172,457,344,323]];
   const details = [[20,279,344,101],[404,238,344,142],[788,238,344,142],[1172,298,344,82],[20,586,344,194],[404,541,344,239],[788,468,344,312],[1172,652,344,128],[32,820,319,360],[404,997,344,183],[788,983,344,197],[1172,941,344,239]];
@@ -90,8 +88,7 @@
       this.visualPlayer = null;
       this.clock = 0;
       this.lookAhead=0;
-      this.ghost=null;
-      this.visualTime=0;
+      this.raceEntities=[];this.raceIdentity=null;this.projectiles=[];
     }
     resize(run) {
       this.width = this.ctx.canvas?.width || W;
@@ -114,6 +111,23 @@
       this.camera = { x: p.x - this.width * (portrait?.24:.22) / .93, y: p.y - this.height * (portrait?.60:.64) / .93, zoom: .93 };
       this.ready = true;
     }
+    setRaceIdentity(identity){this.raceIdentity=identity||null;}
+    setRaceEntities(entities){this.raceEntities=Array.isArray(entities)?entities:[];}
+    setProjectiles(projectiles){this.projectiles=Array.isArray(projectiles)?projectiles:[];}
+    racerLabel(name,color,x,y,portrait){
+      const ctx=this.ctx,c=color||'#f4c542';ctx.save();ctx.translate(x,y);ctx.fillStyle=c;ctx.strokeStyle='rgba(10,9,8,.9)';ctx.lineWidth=2;
+      ctx.beginPath();ctx.moveTo(0,7);ctx.lineTo(-5,-1);ctx.lineTo(5,-1);ctx.closePath();ctx.fill();ctx.stroke();
+      ctx.font=`700 ${portrait?11:9}px system-ui,sans-serif`;ctx.textAlign='center';ctx.textBaseline='bottom';ctx.strokeText(String(name||'RACER').slice(0,20),0,-6);ctx.fillText(String(name||'RACER').slice(0,20),0,-6);ctx.restore();
+    }
+    finishLine(run){
+      if(!Number.isFinite(run?.track?.finishX)&&!Number.isFinite(run?.finishX))return;const x=run.track?.finishX??run.finishX,y=run.terrain(x),ctx=this.ctx;
+      ctx.save();ctx.translate(x,y);ctx.strokeStyle='#f2efe9';ctx.lineWidth=5;ctx.beginPath();ctx.moveTo(0,8);ctx.lineTo(0,-125);ctx.stroke();ctx.beginPath();ctx.moveTo(110,8);ctx.lineTo(110,-125);ctx.stroke();
+      for(let row=0;row<2;row++)for(let col=0;col<8;col++){ctx.fillStyle=(row+col)%2?'#0a0908':'#f2efe9';ctx.fillRect(col*13.75,-122+row*14,13.75,14);}ctx.fillStyle='#e8a13a';ctx.font='700 16px system-ui,sans-serif';ctx.textAlign='center';ctx.fillText('FINISH',55,-92);ctx.restore();
+    }
+    remoteRacers(run,left,right,portrait){
+      const ctx=this.ctx;for(const r of this.raceEntities){if(r.forfeited||r.x<left-80||r.x>right+80)continue;const y=Number.isFinite(r.y)?r.y:run.terrain(r.x),frame=r.grounded?(r.speed>480?1:0):(r.vy<0?4:5);ctx.save();ctx.globalAlpha=r.finishMs!=null?.45:.72;ctx.translate(r.x,y-1);ctx.rotate(r.angle||0);this.sprite(this.images.characters,characters[frame],0,0,portrait?52:36,false);ctx.restore();this.racerLabel(r.name,r.color,r.x,y-(portrait?58:45),portrait);}
+      for(const q of this.projectiles){if(q.x<left-30||q.x>right+30)continue;ctx.save();ctx.globalAlpha=.9;ctx.fillStyle=q.color||'#f4c542';ctx.beginPath();ctx.arc(q.x,q.y,7,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#f2efe9';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();}
+    }
     burst(x, y, color, amount, strength) {
       for (let i = 0; i < amount; i++) this.particles.push({
         x, y, vx: -25 - Math.random() * (strength || 90), vy: -10 - Math.random() * 75,
@@ -125,8 +139,6 @@
       if(event.type==='rush')this.burst(event.x,event.y,'#e8a13a',20,190);
       if(event.type==='redRush')this.burst(event.x,event.y,'#e03b3b',12,100);
       if(event.type==='heart')this.burst(event.x,event.y,'#3ddc54',12,90);
-      if(event.type==='cargo-land')this.burst(event.x,event.y,'#8d8880',12,95);
-      if(event.type==='escape')this.burst(event.x,event.y-10,'#3ddc54',10,100);
       if (event.type === 'land') { this.landPose = .22; this.burst(event.x, event.y, '#8d8880', 8); }
       if(event.type==='jump'){
         this.jumpPose=.18;this.burst(event.x,event.y,'#8d8880',5,45);
@@ -234,7 +246,6 @@
     update(run, dt, alpha=1) {
       if (!this.ready) this.reset(run);
       this.clock+=dt;
-      this.visualTime=Math.max(0,run.time-(run.dead?0:(1-clamp(alpha,0,1))/120));
       const old=run.previousPlayer,current=run.player;
       this.visualPlayer={...current};
       if(old&&!run.dead){
@@ -245,15 +256,14 @@
       const p = this.visualPlayer, altitude = Math.max(0, run.terrain(p.x) - p.y);
       const portrait=this.height>this.width;
       const landing=this.landingPoint(run,p),drop=landing?Math.max(0,landing.y-p.y):altitude;
-      const upcomingDrop=p.grounded?Math.max(0,run.terrain(p.x+clamp(p.speed*.85,280,670))-p.y):0;
-      const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011-Math.min(.045,upcomingDrop*.0001);
+      const speedZoom=.94-Math.max(0,p.speed-300)*.0004-altitude*.00011;
       const landingZoom=drop>this.height*.45?this.height*.50/(drop+70):.94;
       const zoom = clamp(Math.min(speedZoom,landingZoom),portrait?.52:.58,.94);
       // Reveal a deep landing promptly, then return to normal scale gradually.
       const ease = 1 - Math.exp(-dt * (zoom<this.camera.zoom?6:2.8));
       this.camera.zoom += (zoom - this.camera.zoom) * ease;
       // Keep the hero inside the frame even on the highest balloon routes.
-      const lookDown=Math.min(Math.max(altitude*.38,drop*.40,upcomingDrop*.22),this.height*.32/this.camera.zoom);
+      const lookDown=Math.min(Math.max(altitude*.38,drop*.40),this.height*.32/this.camera.zoom);
       const fallLead=p.grounded?0:clamp(p.vy*.14,0,this.height*.07/this.camera.zoom);
       const targetY = p.y + lookDown + fallLead - this.height * (portrait?.58:.62) / this.camera.zoom;
       this.camera.y += (targetY - this.camera.y) * (1 - Math.exp(-dt * 7));
@@ -306,57 +316,6 @@
       ctx.lineTo(half*.1,y+2);ctx.lineTo(half*.65,y-2);ctx.lineTo(half,y+1);ctx.stroke();
       if(good){ctx.beginPath();ctx.moveTo(4,y-6);ctx.lineTo(9,y-3);ctx.lineTo(4,y);ctx.stroke();}
       ctx.restore();
-    }
-    cargoCrate(x,y,width,height,broken=false) {
-      if(this.images.cargo){
-        const crop=cargoParts[broken?3:1];
-        this.ctx.drawImage(this.images.cargo,...crop,x-width/2,y-height,width,height);
-      }else{
-        // Missing optional art must not make a real collider invisible.
-        this.obstacle(5,x,y,width,height);this.groundMark(width,height);
-      }
-    }
-    fallingCargo(run,item) {
-      const ctx=this.ctx,drop=item.drop;
-      if(drop.at===null)return;
-      const age=run.time-drop.at,ground=run.terrain(item.x),width=item.width,height=item.height;
-      // A warning/shadow is present from the trigger, including while the
-      // package is above the viewport. It is never a second collider.
-      if(!drop.landed){
-        ctx.save();ctx.translate(drop.landX??item.x,run.terrain(drop.landX??item.x));ctx.rotate(run.slope(drop.landX??item.x));
-        ctx.strokeStyle='rgba(224,59,59,.60)';ctx.lineWidth=2;
-        ctx.beginPath();ctx.moveTo(-29,-3);ctx.lineTo(-10,-3);ctx.moveTo(10,-3);ctx.lineTo(29,-3);ctx.stroke();
-        ctx.fillStyle='rgba(10,9,8,.35)';ctx.beginPath();ctx.ellipse(0,1,clamp(34-(ground-item.y)*.015,13,34),4,0,0,Math.PI*2);ctx.fill();
-        ctx.restore();
-        const markerY=Math.max(this.camera.y+52/this.camera.zoom,Math.min(item.y-height-130,ground-160));
-        ctx.save();ctx.translate(item.x,markerY);ctx.globalAlpha=.7+.2*Math.sin(this.clock*8);ctx.fillStyle='#e03b3b';
-        ctx.beginPath();ctx.moveTo(-5,-4);ctx.lineTo(5,-4);ctx.lineTo(0,3);ctx.closePath();ctx.fill();ctx.restore();
-      }
-      if(age<drop.warning)return;
-      const collapse=drop.landed?clamp((run.time-drop.landedAt)/.65,0,1):0;
-      const sway=(drop.landed?0:18)+Math.sin(age*2.5+item.x*.01)*6;
-      const anchorY=item.y-height-62*(1-collapse),canopyWidth=96*(1-collapse*.10);
-      if(collapse<1){
-        ctx.save();ctx.globalAlpha=1-collapse*.5;
-        ctx.strokeStyle='#8d8880';ctx.lineWidth=.9;
-        for(const side of [-1,1]){
-          ctx.beginPath();ctx.moveTo(item.x+side*width*.38,item.y-height+5);
-          ctx.lineTo(item.x+sway+side*canopyWidth*.41,anchorY-8);ctx.stroke();
-        }
-        ctx.translate(item.x+sway,anchorY);ctx.rotate(Math.sin(age*2.5)*.04);
-        if(this.images.cargo)this.sprite(this.images.cargo,cargoParts[0],0,0,canopyWidth,false);
-        else {ctx.fillStyle='#70352e';ctx.beginPath();ctx.ellipse(0,-15,48,27,0,Math.PI,0);ctx.closePath();ctx.fill();}
-        ctx.restore();
-      }else if(run.time-drop.landedAt<2&&this.images.cargo){
-        ctx.save();ctx.globalAlpha=Math.max(0,1-(run.time-drop.landedAt-.65)/1.35)*.65;
-        this.sprite(this.images.cargo,cargoParts[2],item.x+27,ground+2,70,false);ctx.restore();
-      }
-      ctx.save();ctx.translate(item.x,item.y);
-      if(drop.landed){
-        ctx.rotate(run.slope(item.x));
-        const bounce=Math.max(0,1-(run.time-drop.landedAt)/.22);ctx.scale(1+bounce*.12,1-bounce*.10);
-      }else ctx.rotate(Math.sin(age*2.5)*.045);
-      this.cargoCrate(0,0,width,height);ctx.restore();
     }
     groundPlacement(run,x,width,angle=0,feet=[[-.45,.45]]) {
       const cosine=Math.cos(angle),sine=Math.sin(angle),surface=run.terrain(x);
@@ -504,23 +463,6 @@
         start = Math.max(start, gap.end);
       }
       drawSection(start, right);
-      // Surface language: soft sand is hatched gold-brown, safe launch lips
-      // and speed pads are green, cliff edges and hazards carry restrained red.
-      for(const section of run.encounters){
-        const a=Math.max(left,section.flatStart),b=Math.min(right,section.sandEnd);
-        if(b<=a)continue;
-        ctx.save();ctx.strokeStyle='rgba(232,161,58,.26)';ctx.lineWidth=2;
-        for(let x=Math.ceil(a/24)*24;x<b;x+=24){const y=run.terrain(x);ctx.beginPath();ctx.moveTo(x,y+7);ctx.lineTo(x+9,y+12);ctx.stroke();}
-        ctx.strokeStyle='rgba(232,161,58,.32)';ctx.lineWidth=1;ctx.setLineDash([8,10]);
-        ctx.beginPath();ctx.moveTo(a,run.terrain(a)+1);for(let x=a+10;x<b;x+=10)ctx.lineTo(x,run.terrain(x)+1);ctx.stroke();ctx.restore();
-      }
-      for(const gap of run.gaps){
-        if(gap.end<left||gap.x>right)continue;
-        for(const x of [gap.x-18,gap.end+12]){
-          ctx.strokeStyle='#8d8880';ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x,run.terrain(x)+1);ctx.lineTo(x,run.terrain(x)-27);ctx.stroke();
-          ctx.fillStyle='#e03b3b';ctx.beginPath();ctx.moveTo(x,run.terrain(x)-27);ctx.lineTo(x+11,run.terrain(x)-22);ctx.lineTo(x,run.terrain(x)-17);ctx.closePath();ctx.fill();
-        }
-      }
       for (const r of run.ramps) {
         if (r.end < left || r.x > right) continue;
         // The ramp is already part of the real ground, including its smooth
@@ -528,9 +470,6 @@
         ctx.beginPath();ctx.moveTo(r.end-90,run.terrain(r.end-90));
         for(let x=r.end-84;x<r.end;x+=6)ctx.lineTo(x,run.terrain(x));
         ctx.lineTo(r.end,run.terrain(r.end));ctx.strokeStyle='rgba(61,220,84,.65)';ctx.lineWidth=2;ctx.stroke();
-        ctx.save();ctx.translate(r.end-35,run.terrain(r.end-35)-5);ctx.rotate(run.slope(r.end-35));
-        ctx.strokeStyle='#3ddc54';ctx.lineWidth=1.8;
-        for(const offset of [-15,0]){ctx.beginPath();ctx.moveTo(offset-5,-6);ctx.lineTo(offset,-3);ctx.lineTo(offset-5,0);ctx.stroke();}ctx.restore();
       }
     }
     rails(run, left, right) {
@@ -560,25 +499,6 @@
       ctx.bezierCurveTo(22,13,15,18,12,21);ctx.closePath();ctx.fill();ctx.stroke();
       ctx.restore();
     }
-    drawGhost(run,left,right){
-      if(!this.ghost||run.mode!=='trial'||this.intro>0)return;
-      const seconds=this.visualTime,ghost=this.ghost.poseAt(seconds);
-      if(seconds>this.ghost.timeMs/1000+.6||ghost.x<left||ghost.x>right)return;
-      const ctx=this.ctx,portrait=this.height>this.width;
-      ctx.save();ctx.strokeStyle='#f2efe9';ctx.lineWidth=1.4;ctx.globalAlpha=.20;
-      ctx.setLineDash([5,7]);ctx.beginPath();
-      for(let i=0;i<=10;i++){
-        const pose=this.ghost.poseAt(Math.max(0,seconds-.4+i*.04));
-        if(i===0)ctx.moveTo(pose.x,pose.y-18);else ctx.lineTo(pose.x,pose.y-18);
-      }
-      ctx.stroke();ctx.setLineDash([]);
-      ctx.translate(ghost.x,ghost.y-1);ctx.rotate(ghost.angle);
-      ctx.globalAlpha=.32*(ghost.finished?Math.max(0,1-(seconds-this.ghost.timeMs/1000)/.6):1);
-      const frame=ghost.flipping?2:ghost.rail?3:ghost.grounded?1:ghost.rising?4:5;
-      this.sprite(this.images.characters,characters[frame],0,0,portrait?60:40,false);
-      ctx.globalAlpha=.45;ctx.strokeStyle='#f2efe9';ctx.lineWidth=1;
-      ctx.beginPath();ctx.moveTo(-17,3);ctx.lineTo(17,3);ctx.stroke();ctx.restore();
-    }
     draw(run) {
       const ctx = this.ctx, p = this.visualPlayer||run.player, cam = this.camera;
       const W=this.width,H=this.height,portrait=H>W;
@@ -590,8 +510,6 @@
       if (left < 50 && right > -220) this.vault(run);
       for (const scenery of run.scenery) {
         if (scenery.x < left || scenery.x > right)continue;
-        if(run.items.some(item=>!item.hit&&(run.touchesGroundHazard(item)||item.type==='boost')&&Math.abs(item.x-scenery.x)<115))continue;
-        if(run.ramps.some(r=>Math.abs(r.end-scenery.x)<125))continue;
         const biome=run.biome(scenery.x),index=scenery.type==='pylon'?1:7;
         const choice=Math.floor(run.terrainRandom(Math.floor(scenery.x),712697)*3);
         const decoration=[ [5,6,10], [8,10,6], [9,7,11], [11,9,10] ][biome][choice];
@@ -614,18 +532,10 @@
       ctx.globalAlpha = 1;
       this.rails(run,left,right);
       this.terrain(run,left,right,bottom);
-      if(run.trial&&run.trial.distance>left&&run.trial.distance<right){
-        const x=run.trial.distance,y=run.terrain(x);
-        ctx.save();ctx.translate(x,y);ctx.strokeStyle='#8d8880';ctx.lineWidth=2;
-        ctx.beginPath();ctx.moveTo(0,1);ctx.lineTo(0,-110);ctx.stroke();
-        ctx.fillStyle='#f26b35';ctx.fillRect(0,-110,74,25);
-        ctx.fillStyle='#0a0908';ctx.font='bold 11px sans-serif';ctx.fillText('FINISH',9,-93);
-        ctx.fillStyle='#3ddc54';ctx.fillRect(-5,-4,10,4);ctx.restore();
-      }
+      this.finishLine(run);
       for (const item of run.items) {
         if (item.hit || item.x < left || item.x > right)continue;
-        if(item.type==='cargo')this.fallingCargo(run,item);
-        else if(item.type==='coin'){
+        if(item.type==='coin'){
           const width=portrait?17:12,spin=.82+.18*Math.cos(run.time*3+item.x*.03);
           ctx.drawImage(this.images.coin,item.x-width*spin/2,item.y-width/2,width*spin,width);
         }
@@ -648,11 +558,8 @@
           ctx.beginPath();ctx.arc(0,0,width*.55*pulse,-.8,.9);ctx.stroke();ctx.restore();
         }
         else if(item.type==='boost') {
-          if(!item.aerial)this.groundShadow(run,item.x,52);
-          const mount=item.aerial?{x:item.x,y:item.y+8,angle:-.15}:this.groundPlacement(run,item.x,52,run.slope(item.x));
-          ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);this.groundMark(52,16,true);
-          ctx.strokeStyle='#3ddc54';ctx.lineWidth=2;
-          for(const offset of [-10,0,10]){ctx.beginPath();ctx.moveTo(offset-4,-20);ctx.lineTo(offset+1,-16);ctx.lineTo(offset-4,-12);ctx.stroke();}ctx.restore();
+          if(item.shared){ctx.save();ctx.translate(item.x,item.y);ctx.globalAlpha=.22;ctx.fillStyle='#e8a13a';ctx.beginPath();ctx.arc(0,0,34,0,Math.PI*2);ctx.fill();ctx.globalAlpha=1;this.prop(5,0,0,48);ctx.restore();}
+          else{this.groundShadow(run,item.x,52);const mount=this.groundPlacement(run,item.x,52,run.slope(item.x));ctx.save();ctx.translate(mount.x,mount.y);ctx.rotate(mount.angle);this.prop(5,0,0,52);this.groundMark(52,16,true);ctx.restore();}
         } else {
           const art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
           this.groundShadow(run,item.x,item.width||38);
@@ -670,12 +577,12 @@
           ctx.restore();
         }
       }
+      this.remoteRacers(run,left,right,portrait);
       for(const item of this.hitObjects){
         const t=1-item.life/.42,art={rock:0,barrier:1,log:2,cart:3,spikes:4,stack:5}[item.type];
         ctx.save();ctx.globalAlpha=(1-t)*.8;ctx.translate(item.x+t*18,item.y-t*9);
         ctx.rotate(item.angle+t*.35);
-        if(item.type==='cargo')this.cargoCrate(0,1,item.width*1.25,item.height*.7,true);
-        else if(art!==undefined){this.obstacle(art,0,1,item.width||38,item.height||28);this.groundMark(item.width||38,item.height||28);}
+        if(art!==undefined){this.obstacle(art,0,1,item.width||38,item.height||28);this.groundMark(item.width||38,item.height||28);}
         ctx.restore();
       }
       for(const q of this.particles){
@@ -683,7 +590,6 @@
         ctx.save();ctx.translate(q.x,q.y);if(q.angle!==undefined)ctx.rotate(q.angle);ctx.fillRect(-q.size/2,-q.size/2,q.size,q.size);ctx.restore();
       }
       ctx.globalAlpha=1;
-      this.drawGhost(run,left,right);
       if(run.dog.active){
         const dx=p.x-run.dog.distance;
         const frame=8+Math.floor(run.time*11)%4;
@@ -739,15 +645,9 @@
         }
       }
       this.sprite(extra>=0?this.images.extras:this.images.characters,extra>=0?extraCharacters[extra]:characters[frame],0,0,portrait?60:40,false);
-      ctx.restore();ctx.restore();ctx.globalAlpha=1;
-      if(run.dog.active&&run.dog.warning){
-        const x=(p.x-run.dog.distance-cam.x)*cam.zoom;
-        if(x<14){
-          const y=clamp((p.y-cam.y)*cam.zoom-16,H*.32,H*.8);
-          ctx.save();ctx.fillStyle='#e03b3b';ctx.globalAlpha=.55+.2*Math.sin(this.clock*7);
-          ctx.beginPath();ctx.moveTo(8,y);ctx.lineTo(17,y-6);ctx.lineTo(17,y+6);ctx.closePath();ctx.fill();ctx.restore();
-        }
-      }
+      ctx.restore();
+      if(this.raceIdentity&&this.intro<=0)this.racerLabel(this.raceIdentity.name,this.raceIdentity.color,actorX,actorY-(portrait?66:50),portrait);
+      ctx.restore();ctx.globalAlpha=1;
       if(this.intro>0 && this.intro<=BREACH_REMAINING && this.intro>BREACH_REMAINING-.09){
         ctx.fillStyle='rgba(242,239,233,'+((this.intro-(BREACH_REMAINING-.09))/.09*.07)+')';ctx.fillRect(0,0,W,H);
       }

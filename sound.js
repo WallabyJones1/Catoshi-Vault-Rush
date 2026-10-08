@@ -9,7 +9,7 @@
   let music=null,musicPriming=false,playing=false,coinSequence=0;
   let anchor=null,anchorPriming=false,anchorAttempt=0;
   const active=new Set(),pending=[],voices=[];
-  const clips={burst:'burst',coin:'coin',jump:'jump','flip-start':'flip',flip:'flip',land:'land',crash:'crash',rush:'rush',redRush:'red',heart:'red','cargo-land':'wood',escape:'land',finish:'land'};
+  const clips={burst:'burst',coin:'coin',jump:'jump','flip-start':'flip',flip:'flip',land:'land',crash:'crash',rush:'rush',redRush:'red',heart:'red'};
   function mediaClip(event){
     if(event.type==='stumble')return event.fatal?null:['metal','wood','stone'].includes(event.material)?event.material:'stone';
     if(event.type==='trick')return /BACKFLIP/.test(event.text)?'red':event.text==='RUSH BOOST'?'rush':event.text==='CABLE GRIND'?'flip':null;
@@ -59,7 +59,7 @@
     const voice=bank.find(voice=>voice.audio.paused||voice.audio.ended)||bank.reduce((a,b)=>a.serial<b.serial?a:b);
     const audio=voice.audio,serial=++voice.serial;
     try{
-      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?coinLevel:event.type==='heart'?.45:event.type==='cargo-land'?.30:1);
+      audio.pause();audio.currentTime=0;audio.volume=volume(settings.effectsVolume??.72)*(event.type==='coin'?coinLevel:event.type==='heart'?.45:1);
       audio.playbackRate=event.type==='coin'?1+(coinSequence++%5)*.025:1;
       Promise.resolve(audio.play()).then(()=>{
         if(voice.serial===serial&&(!playing||document.hidden))audio.pause();
@@ -231,8 +231,6 @@
     else if(event.type==='land'){noise(.09,.14,850);tone(105,65,.09,.18);}
     else if(event.type==='stumble')sample(['metal','wood','stone'].includes(event.material)?event.material:'stone',context.currentTime,event.heavy?1:1.16);
     else if(event.type==='crash')sample('crash',context.currentTime);
-    else if(event.type==='cargo-land')sample('wood',context.currentTime,.82,.30);
-    else if(event.type==='escape'||event.type==='finish'){tone(440,660,.18,.08);tone(880,880,.16,.07,.1);}
     else if(event.type==='trick'&&/BACKFLIP/.test(event.text)){
       [420,560,840].forEach((pitch,i)=>tone(pitch,pitch*1.02,.13,.15,i*.065,'triangle'));
     }else if(event.type==='trick'&&event.text==='RUSH BOOST'){tone(170,620,.25,.2,0,'triangle');noise(.15,.12,1600);}
