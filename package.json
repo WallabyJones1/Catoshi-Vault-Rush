@@ -2,13 +2,14 @@
   "name": "catoshi-vault-rush-multiplayer",
   "version": "5.0.0",
   "private": true,
-  "description": "Standalone free Catoshi side-scrolling multiplayer racing service; no payments or wallets",
+  "description": "Free Catoshi Vault Rush site with an isolated real-time multiplayer racing service",
   "engines": {
     "node": ">=24 <26"
   },
   "scripts": {
-    "start": "node multiplayer-server.cjs",
-    "test": "node --test race.test.cjs multiplayer.test.cjs server.test.cjs isolation.test.cjs"
+    "start": "node server.cjs",
+    "start:multiplayer": "node multiplayer-server.cjs",
+    "test": "node --test race.test.cjs multiplayer.test.cjs server.test.cjs isolation.test.cjs main-integration.test.cjs"
   },
   "dependencies": {
     "socket.io": "4.8.1"
