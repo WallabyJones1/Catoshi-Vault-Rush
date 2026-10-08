@@ -5,6 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const TAU = Math.PI * 2;
+  const TRIAL_KICKER_SPEED=620;
   const SPEED_LIMITS=Object.freeze({ground:900,air:930,landing:920,rush:1280,rushFloor:1010,rushStart:1120});
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
   const angleDelta = (angle) => Math.atan2(Math.sin(angle), Math.cos(angle));
@@ -136,8 +137,9 @@
         const u=clamp((x-section.start)/section.length,0,1),envelope=Math.sin(u*Math.PI)**4;
         const bump=u<=section.peak?this.smooth(u/section.peak):1-this.smooth((u-section.peak)/(1-section.peak));
         varied+=section.dropBefore;
-        if(section.kind===1)varied-=section.height*section.lift*bump;
-        else if(section.kind===2)varied+=section.height*1.10*bump;
+        // Climbs stay real but shorter: a long uphill crawl is where most runs died.
+        if(section.kind===1)varied-=section.height*section.lift*.82*bump;
+        else if(section.kind===2)varied+=section.height*.88*bump;
         else if(section.kind===3){
           // A sustained descent gains elevation loss without a forced climb
           // at its exit. Both ends retain continuous height, slope and curvature.
@@ -286,7 +288,7 @@
       // Long climbs get an optional green jump line. Ground coasting misses
       // it, but a player who reads the hill can preserve escape momentum.
       for(let x=Math.max(2500,start+150);x<end-160;x+=280){
-        if(x-this.lastClimbBoost<1050||this.derivative(x)>-.12||this.terrain(x-180)-this.terrain(x+450)<140)continue;
+        if(x-this.lastClimbBoost<760||this.derivative(x)>-.12||this.terrain(x-180)-this.terrain(x+450)<140)continue;
         if(this.ramps.some(r=>x>r.x-100&&x<r.recovery+100)||this.gaps.some(g=>x>g.x-400&&x<g.end+250))continue;
         if(this.items.some(i=>(i.hazard||i.type==='boost'||['rock','log'].includes(i.type))&&Math.abs(i.x-x)<260))continue;
         this.items.push({type:'boost',x,y:this.terrain(x)-105,aerial:true,climb:true,hit:false});
@@ -407,6 +409,12 @@
               const slope=Math.abs(this.derivative(cx));
               const curvature=(this.derivative(cx+5)-this.derivative(cx-5))/10;
               risk=Math.max(risk,slope/.65,curvature/.0011);
+            }
+            // A crest farther back can throw the rider into the air; never put
+            // the hazard where that flight comes down.
+            for(let cx=candidate-1300;cx<candidate-600;cx+=45){
+              const curvature=(this.derivative(cx+5)-this.derivative(cx-5))/10;
+              risk=Math.max(risk,curvature/.0011);
             }
             if(this.ramps.some(r=>r.end>candidate-1050&&r.x<candidate+100)||this.gaps.some(g=>g.end>candidate-700&&g.x<candidate+100)
               ||this.rails.some(r=>r.end>candidate-850&&r.x<candidate+100))risk+=3;
@@ -539,6 +547,10 @@
       const angle = p.rail ? this.railSlope(p.rail, p.x) : p.ramp ? this.rampSlope(p.ramp, p.x) : this.slope(p.x);
       const lip=this.ramps.find(r=>r.end-p.x>=-35&&r.end-p.x<=clamp(p.speed*.18,55,105));
       const sweet=Boolean(lip&&(p.grounded||p.coyote>0)&&p.recovery<=0&&p.speed>240);
+      // Speed Trial kickers are booster ramps when you jump from them: a rider
+      // slowed by an earlier mistake still clears the chasm, so it costs time
+      // rather than the run. Riding off without a jump gets no booster.
+      if(this.mode==='trial'&&p.ramp?.booster)p.speed=Math.max(p.speed,TRIAL_KICKER_SPEED);
       p.vx = p.speed * Math.cos(angle);
       p.vy = p.speed * Math.sin(angle) - (350 + p.speed * 0.18) - (sweet?80:0);
       p.takeoffBonus=sweet?120:0;
@@ -580,11 +592,15 @@
       // aligned flip banks its reward even after a very high jump.
       const cleanFlip=turns>0&&rotation<=.95&&p.recovery<=0&&!p.recoveryGap;
       const approachSpeed=Math.max(0,p.vx);
-      const impactLimit=Math.max(760,920-Math.floor(p.x/5000)*25);
+      // Only a genuinely huge impact is a stumble. Ordinary landings lose speed
+      // in proportion to how hard they hit, so meeting a downslope keeps flow.
+      const impactLimit=Math.max(1060,1180-Math.floor(p.x/5000)*20);
       const misaligned=p.rush<=0&&p.invulnerable<=0&&p.recovery<=0&&!p.recoveryGap&&p.airborne>.25&&p.held&&rotation>1.02;
       const badFlip=this.mode!=='trial'&&misaligned;
       p.speed = clamp(p.vx * Math.cos(angle) + p.vy * Math.sin(angle), p.rush>0?SPEED_LIMITS.rushFloor:115, p.rush>0?SPEED_LIMITS.rush:SPEED_LIMITS.landing);
-      const rough=misaligned||!cleanFlip&&p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
+      // Speed Trials are about the line: a hard landing costs speed (below) but
+      // never a stagger-and-crawl. A botched flip is still a rough landing.
+      const rough=misaligned||this.mode!=='trial'&&!cleanFlip&&p.rush<=0&&p.recovery<=0&&!p.recoveryGap&&impact>impactLimit;
       if (badFlip) {
         // A mistimed flip spends one life, just like a rock. An upright
         // automatic landing, however high, does not spend a life.
@@ -601,7 +617,7 @@
         p.recovery=Math.max(p.recovery,1.2);this.combo=1;this.slowTime=0;
         if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
         this.event('stumble',{x:p.x,y,angle,heavy:false,material:'stone',kind:'landing'});
-      }else if(!cleanFlip&&p.rush<=0&&impact>650)p.speed*=.8;
+      }else if(!cleanFlip&&p.rush<=0&&impact>700)p.speed*=1-Math.min(this.mode==='trial'?.25:.2,(impact-700)/1750);
       p.y = y;
       p.angle = angle;
       p.grounded = true;
@@ -667,6 +683,9 @@
       if(this.dog.active)this.dog.distance=Math.max(90,this.dog.distance);
       this.combo = 1;
       this.slowTime = 0;
+      // One mistake is a setback, not a death sentence: the hound cannot start
+      // a chase until the rider has had a moment to rebuild speed.
+      this.houndGrace = 2.2;
       this.lives--;
       const material=['barrier','cart','stack','crate'].includes(item.type)?'metal':['log','cargo'].includes(item.type)?'wood':'stone';
       this.event('stumble', { x:p.x,y:p.y,angle:p.angle,heavy,loss:before-p.speed,material,
@@ -715,6 +734,7 @@
       p.rush = Math.max(0, p.rush - dt);
       p.stagger = Math.max(0, p.stagger - dt);
       p.recovery = Math.max(0,p.recovery-dt);
+      this.houndGrace = Math.max(0,(this.houndGrace||0)-dt);
       if(this.time-p.lastMistake>7)p.mistakes=0;
       if(p.recoveryGap&&p.x>=p.recoveryGap.end)p.recoveryGap=null;
       if (p.held) p.heldTime += dt;
@@ -725,7 +745,7 @@
         const acceleration = 620 * Math.sin(angle) * 0.45 + 20 - p.speed * 0.075 + (p.boost > 0 ? 75 : 0) + (p.recovery>0?(this.mode==='trial'?48:10):0)
           -sand*(120+p.speed*.09);
         const maximum=p.rush>0?SPEED_LIMITS.rush:Math.max(SPEED_LIMITS.ground,p.speed-360*dt);
-        const minimum=this.mode==='trial'?65:p.x<2400?200:p.mistakes>0?0:angle>=-.08?45:65;
+        const minimum=this.mode==='trial'?65:p.x<2400?200:p.mistakes>1?0:p.mistakes===1&&p.recovery>0&&angle>=-.08?150:p.mistakes>0?0:angle>=-.08?45:65;
         p.speed = clamp(p.speed + acceleration * dt, p.rush>0?SPEED_LIMITS.rushFloor:minimum, maximum);
         p.vx = p.speed * Math.cos(angle);
         p.vy = p.speed * Math.sin(angle);
@@ -741,7 +761,8 @@
             this.event('trick', { text: 'LAUNCH', points: 0 });
           }
         } else {
-          const ramp = this.ramps.find(r => previousX <= r.x + 14 && p.x >= r.x && p.x < r.end && p.y >= r.y - 12);
+          // Trials: landing part-way up a kicker face still rides (and launches) it.
+          const ramp = this.ramps.find(r => p.x >= r.x && p.x < r.end && (previousX <= r.x + 14 && p.y >= r.y - 12 || this.mode==='trial'&&r.booster));
           if (ramp) { p.ramp = ramp; p.y = this.rampY(ramp, p.x); }
           else if (this.gapAt(p.x)) {
             if(p.recovery>0)p.recoveryGap=this.gapAt(p.x);
@@ -838,7 +859,7 @@
       const pressure=this.sandAt(p.x)>.15;
       const threat=clamp((p.x-2400)/22000,0,1);
       const lowSpeed=p.x<2400?160:pressure?360:300+threat*70;
-      this.slowTime = p.rush>0?0:p.speed < lowSpeed ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
+      this.slowTime = p.rush>0||this.houndGrace>0?0:p.speed < lowSpeed ? this.slowTime + dt : Math.max(0, this.slowTime - dt * 1.5);
       const wasActive = this.dog.active;
       if (this.mode!=='trial'&&!wasActive && p.rush<=0&&this.slowTime > .7) {
         this.dog.active = true;
@@ -871,14 +892,17 @@
     }
     drainEvents() { const events = this.events; this.events = []; return events; }
   }
-  // Hand-authored, versioned courses: identical terrain, ramps and boost
-  // locations for every player, with no prize or endless-run RNG involved.
+  // Hand-authored, versioned courses with identical terrain, ramps and pads for
+  // every player and no endless-run RNG. V17 rebuilds 2-5 on a flowing rhythm:
+  // every short kicker rise (with a launch ramp and often a chasm) is followed by
+  // at least 3,600 units of downhill, so flights land on a slope instead of the
+  // next climb.
   const TRIAL_COURSES = [
     {id:1,name:'DUNE DASH',theme:0,gaps:[[4200,350],[7960,360]],legs:[[900,160],[1000,380],[850,-170],[1200,520],[800,30],[1250,650],[650,-160],[1000,650],[850,40]]},
-    {id:2,name:'CANYON FLOW',theme:0,gaps:[[3720,370],[14400,440]],legs:[[800,130],[1500,900],[900,-380],[1100,60],[1700,1150],[900,-240],[1500,470],[1600,860],[900,-360],[1600,1250],[2600,80]]},
-    {id:3,name:'FOREST FLIGHT',theme:1,gaps:[[6900,430],[13750,320],[18400,460]],legs:[[800,150],[1400,-350],[2200,1700],[1400,-700],[1800,70],[2500,1800],[1300,-650],[1900,1400],[1700,260],[1200,-520],[1900,1600],[1500,90]]},
-    {id:4,name:'RIDGE RUNNER',theme:2,gaps:[[7950,480],[19800,380],[24900,540]],legs:[[1000,180],[2000,-720],[2200,2200],[1700,-900],[2600,180],[2600,2300],[2000,-1000],[2700,2400],[1800,-450],[2400,1850],[1500,-850],[2000,2250],[1700,100]]},
-    {id:5,name:'MIDNIGHT SUMMIT',theme:3,gaps:[[8120,530],[18600,580],[33000,610]],legs:[[1100,160],[1900,-900],[2100,2300],[1800,-1100],[3200,120],[2800,3000],[1900,-900],[2700,2000],[2600,60],[2500,-1400],[2800,3300],[2600,800],[1700,-1000],[2600,3000],[2300,100]]}
+    {id:2,name:'CANYON FLOW',theme:0,gaps:[[3649,330],[9599,370]],legs:[[900,140],[1600,850],[850,-150],[1900,1050],[3300,700],[850,-150],[2100,1250],[3100,620],[1300,130]]},
+    {id:3,name:'FOREST FLIGHT',theme:1,gaps:[[3475,340],[9497,370],[15547,400]],legs:[[800,150],[1600,800],[850,-150],[1700,900],[3500,850],[850,-150],[1900,1050],[3300,700],[850,-150],[2100,1250],[3100,620],[1300,130]]},
+    {id:4,name:'RIDGE RUNNER',theme:2,gaps:[[3840,360],[15989,390],[22076,420]],legs:[[1000,180],[1700,880],[850,-150],[2100,1250],[3100,620],[850,-150],[2300,1350],[3000,560],[850,-150],[1900,1050],[3300,700],[850,-150],[1700,900],[3500,850],[1300,130]]},
+    {id:5,name:'MIDNIGHT SUMMIT',theme:3,gaps:[[4025,380],[10170,400],[22280,420],[28310,440]],legs:[[1100,160],[1800,900],[850,-150],[2300,1350],[3000,560],[850,-150],[2100,1250],[3100,620],[850,-150],[1700,900],[3500,850],[850,-150],[1900,1050],[3300,700],[850,-150],[2300,1350],[3000,560],[1300,130]]}
   ].map(course=>Object.freeze({...course,distance:course.legs.reduce((sum,[length])=>sum+length,0),gaps:Object.freeze(course.gaps.map(gap=>Object.freeze(gap))),legs:Object.freeze(course.legs.map(([length,drop],index)=>Object.freeze([length,index===0?drop:Math.round(drop*(drop>100?1.12:drop<0?1.1:1))])))}));
   Object.freeze(TRIAL_COURSES);
   class Trial extends Run {
@@ -894,12 +918,14 @@
       let start=0;
       for(const [index,[length,drop]] of course.legs.entries()){
         if(index>0&&drop<0&&level>1){
-          const ramp=this.makeRamp(start+length-320,true);ramp.launch=220+level*16;
+          const ramp=this.makeRamp(start+length-320,true);ramp.launch=120+level*8;ramp.booster=true;
           const x=ramp.end+150,t=150/480,angle=this.rampSlope(ramp,ramp.end);
           this.items.push({type:'boost',x,y:Math.min(ramp.endY+(480*Math.sin(angle)-440)*t+345*t*t-17,this.terrain(x)-80),aerial:true,hit:false});
         }
+        // Kicker legs already carry a pad on their launch arc; a second aerial pad
+        // just before the ramp would tempt a hop that skips the kicker entirely.
         const x=start+length*(index%2?.55:.35),aerial=index>0&&(index%2===1||level>2);
-        this.items.push({type:'boost',x,y:this.terrain(x)-(aerial?195+(level-1)*10:3),aerial,hit:false});
+        if(!(index>0&&drop<0&&level>1))this.items.push({type:'boost',x,y:this.terrain(x)-(aerial?195+(level-1)*10:3),aerial,hit:false});
         start+=length;
       }
       for(const [x,width]of course.gaps){
@@ -911,12 +937,14 @@
       // gap approaches so every obstacle has a readable takeoff and landing.
       const obstacleTypes=['rock','log','crate','barrier','stack'];
       let lastObstacle=-Infinity;
-      for(let x=950;x<course.distance-600;x+=120){
+      for(let x=1700;x<course.distance-600;x+=120){
         if(x-lastObstacle<Math.max(950,1450-level*70))continue;
         if(Math.abs(this.derivative(x))>.48||this.derivative(x-500)>.65)continue;
         if(this.gaps.some(g=>x>g.x-850&&x<g.end+550))continue;
-        if(this.ramps.some(r=>x>r.x-500&&x<r.recovery+500))continue;
-        if(this.items.some(i=>Math.abs(i.x-x)<320))continue;
+        // Never inside a launch's flight: keep clear of where even the fastest
+        // possible takeoff from each kicker comes back down.
+        if(this.ramps.some(r=>x>r.x-500&&x<this.longestFlight(r)+1300))continue;
+        if(this.items.some(i=>Math.abs(i.x-x)<320||level>1&&i.aerial&&x-i.x>0&&x-i.x<1500))continue;
         const type=obstacleTypes[(Math.round(x/120)+level)%Math.min(5,level+1)];
         this.items.push({type,x,y:this.terrain(x),width:48+level*5,height:36+level*4,
           hazard:true,heavy:true,hit:false});
@@ -924,6 +952,13 @@
       }
       this.items=this.items.filter(item=>!this.gaps.some(gap=>item.x>gap.x&&item.x<gap.end));
       for(let x=650;x<course.distance;x+=800)if(!this.gapAt(x))this.scenery.push({x,type:'lantern',scale:.8});
+    }
+    longestFlight(ramp){
+      if(ramp.flightEnd)return ramp.flightEnd;
+      // Fastest rider, perfect takeoff, plus a margin for a booster launch.
+      const a=this.rampSlope(ramp,ramp.end),v=SPEED_LIMITS.landing;let x=ramp.end,y=ramp.endY,vx=v*Math.cos(a),vy=v*Math.sin(a)-(350+v*.18)-80;
+      for(let i=0;i<1200;i++){vy+=690/120;vx+=7/120;x+=vx/120;y+=vy/120;if(vy>0&&!this.gapAt(x)&&y>=this.terrain(x))break;}
+      return ramp.flightEnd=x;
     }
     baseTerrain(x){
       if(!this.trial)return super.baseTerrain(x);
@@ -946,5 +981,5 @@
       }
     }
   }
-  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-16-flip-share' };
+  return { Run, Trial, TRIAL_COURSES, SPEED_LIMITS, clamp, angleDelta, TAU, VERSION: 'flow-web-17-flow-trials' };
 });

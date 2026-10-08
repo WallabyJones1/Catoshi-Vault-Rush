@@ -143,8 +143,8 @@ test('leaderboard publishes one best completed run per holder wallet, preserving
 
 test('native red pickups unlock a daily boost that survives midnight on the weekly board, then resets on Monday',async t=>{
  const h=await harness(t,{durable:true});
- // A completed native v14 recording earns both pickups before the hound catches up.
- const inputs=[[746,1],[746,0],[1000,1],[1000,0],[1436,1],[1436,0],[1669,1],[1669,0],[1972,1],[1972,0]];
+ // A completed native v17 recording earns both pickups before the run ends.
+ const inputs=[[770,1],[778,0],[1211,1],[1219,0],[1379,1],[1387,0],[1630,1],[1637,0],[2074,1],[2075,0],[2474,1],[2484,0],[2874,1],[2881,0],[3378,1],[3385,0],[4038,1],[4044,0],[4449,1],[4455,0],[4649,1],[4655,0],[5375,1],[5376,0],[5752,1],[5758,0],[6094,1],[6100,0],[6614,1],[6620,0],[6837,1],[6843,0],[7270,1],[7278,0],[7398,1],[7406,0]];
  const run=new Run(98);let ticks=0,cursor=0;
  while(!run.dead&&ticks<MAX_TICKS){while(cursor<inputs.length&&inputs[cursor][0]===ticks){inputs[cursor++][1]?run.press():run.release();}run.step(1/120);run.drainEvents();ticks++;}
  assert.equal(run.redTokens,1);assert.equal(run.rushPickups,1);assert(run.dead);const rawScore=Math.floor(run.score),results=[];
