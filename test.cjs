@@ -871,8 +871,9 @@ test('wallet-free scored runs keep private browser progress and never accept a p
  const first=(await request('/api/player-status',undefined,'first')).value,second=(await request('/api/player-status?wallet=',undefined,'second')).value;
  assert.equal(first.quota.used,2);assert.equal(second.quota.used,1);assert.equal(first.history.length,2);assert.equal(second.history.length,1);
  assert(first.history.every(run=>run.name!=='Guest Cat 2'));assert(second.history.every(run=>run.name==='Guest Cat 2'));
- const board=(await request('/api/leaderboard')).value;assert.equal(board.entries.length,2,'only the best guest run per browser is shown');
- assert(board.entries.every(run=>run.wallet===null&&!Object.hasOwn(run,'session')));assert.equal(rpcCalls,0);
+ const board=(await request('/api/leaderboard')).value;
+ assert.equal(board.entries.length,0,'wallet-free runs stay off the prize board so every ranked score is payable');
+ assert.equal(rpcCalls,0);
  assert.equal((await request('/api/runs/finish',{id:firstResult.run.id})).value.duplicate,true);
  clock=roundWindow(currentRound(clock)).end+1;const reset=(await request('/api/player-status')).value;
  assert.equal(reset.quota.used,0);assert.equal(reset.quest.collected,0);assert.equal(reset.best,null);

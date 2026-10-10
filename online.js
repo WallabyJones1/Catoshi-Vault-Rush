@@ -115,7 +115,9 @@
       if(generation!==submissionGeneration)return null;
       const progress=result.progress||result.daily;
       lastResult=result;updateStatus(progress||result);
-      $('submission-status').textContent=(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · weekly leaderboard';
+      $('submission-status').textContent=entryWallet
+        ?(result.rank?'Rank #'+result.rank+' · ':'')+'Replay checked · weekly leaderboard'
+        :'Replay checked · add a wallet to appear on the leaderboard';
       const weekLabel=progress&&progress.round!==result.run.round?'LAST WEEK':'THIS WEEK';
       $('personal-best').textContent=result.best
         ?(result.best.id===result.run.id?'BEST RUN ':'YOUR BEST ')+weekLabel+' · '+result.best.score.toLocaleString()+' POINTS'+(result.best.rank?' · #'+result.best.rank:'')

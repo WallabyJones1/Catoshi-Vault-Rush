@@ -17,6 +17,13 @@ const BUILD_ID='site-repair-20';
 const CANONICAL_SHARE_ORIGIN='https://vaultrush.catoshirush.fun';
 const HOLDER_DAILY_RUNS=null; // No daily gameplay quota; kept in config for older clients.
 const rewardAddress=value=>value===undefined||value===null||(typeof value==='string'&&!value.trim())?null:walletAddress(value);
+// Free play needs nothing. A run only reaches the leaderboard with a wallet,
+// so every ranked score can actually be paid, and a ranked score needs a real
+// name rather than the 'Runner' default it would otherwise fall back to.
+function namedWhenRanked(data){
+  if(!String(data.wallet??'').trim())return;
+  if(!String(data.name??'').trim())throw new HttpError(400,'Enter a leaderboard name to go on the board.');
+}
 const STATIC_FILES=new Map([
   ['index.html','text/html; charset=utf-8'],['styles.css','text/css'],['catoshi-classic-home.css','text/css'],['mp-tab.js','text/javascript'],['engine.js','text/javascript'],
   ...['chakra-petch-600','chakra-petch-700','work-sans-400','work-sans-500','work-sans-600'].map(font=>[font+'.woff2','font/woff2']),
@@ -156,7 +163,7 @@ function createApp(config,options={}) {
     return {run:publicRun(run),rank:rank||null,url:shareOrigin(req)+'/score/'+run.id,serverTime:now(),...(progress?{prizeEligible:Boolean(run.wallet),quota:progress.quota,best:holderBest(run.wallet,run.round,run.session),quest:dailyQuest(db,run.wallet,run.round,run.session,dayAt(run.started)),progress,daily:progress}:{}),...extra};
   }
   function ranking(mode,round){
-    return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
+    return db.prepare(`SELECT ${RUN_FIELDS} FROM (SELECT ${RUN_FIELDS},ROW_NUMBER() OVER(PARTITION BY COALESCE(wallet,session) ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode=? AND (?=-1 OR round=?) AND submitted IS NOT NULL AND disqualified IS NULL AND wallet IS NOT NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 50`).all(mode,round,round);
   }
   function trialCourse(level){
     const course=TRIAL_COURSES.find(value=>value.id===level);
@@ -268,6 +275,7 @@ function createApp(config,options={}) {
         const data=await body(req),user=session(req,res);
         if(url.pathname==='/api/trials/start'){
           rate(req,'starts',60,user.id);
+          namedWhenRanked(data);
           const course=trialCourse(data.level),name=playerName(data.name),wallet=rewardAddress(data.wallet);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
           const id=crypto.randomUUID(),started=now();
@@ -297,6 +305,7 @@ function createApp(config,options={}) {
         if(url.pathname==='/api/runs/start'){
           rate(req,'starts',60,user.id);
           if(data.mode&&data.mode!=='holder')throw new HttpError(400,'There is one free play mode. Please reload the game.');
+          namedWhenRanked(data);
           const mode='holder',name=playerName(data.name);
           if(data.engine!==ENGINE_VERSION)throw new HttpError(409,'Reload the game to get the current engine.');
           // Legacy mode 'holder' stores all free prize entries so existing
