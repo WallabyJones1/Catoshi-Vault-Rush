@@ -87,7 +87,7 @@ test('Ed25519 wallet ownership and exact token balance threshold',async()=>{
   await assert.rejects(security.tokenBalance(wallet,'https://unused.invalid',async()=>{throw Error('unavailable');}),/unavailable/);
 });
 test('HTTP pasted-wallet entry, immutable rewards address, checked leaderboard and static isolation',async t=>{
-  let clock=Date.UTC(2026,9,1,1);const keys=crypto.generateKeyPairSync('ed25519');
+  let clock=Date.UTC(2026,9,2,12);const keys=crypto.generateKeyPairSync('ed25519');
   const wallet=encode58(keys.publicKey.export({type:'spki',format:'der'}).subarray(-32));
   const config={...configFromEnv(),database:':memory:'};
   let balanceCalls=0;const app=createApp(config,{now:()=>clock,balance:async address=>{balanceCalls++;return {raw:100000000000n,decimals:6,whole:address===security.MINT?'49999':'100000',eligible:address!==security.MINT};}});

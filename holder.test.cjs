@@ -16,7 +16,7 @@ function simulate(seed){
 async function harness(t,{durable=false,balance}={}){
   const directory=durable?fs.mkdtempSync(path.join(os.tmpdir(),'catoshi-daily-')):null;
   const config={...configFromEnv({}),database:directory?path.join(directory,'game.sqlite'):':memory:'};
-  const h={clock:Date.UTC(2026,9,1,1),cookies:new Map(),config};
+  const h={clock:Date.UTC(2026,9,2,12),cookies:new Map(),config};
   const options={now:()=>h.clock,balance:balance|| (async()=>({raw:50000000000n,decimals:6,whole:'50000',eligible:true}))};
   async function launch(){
     h.app=createApp(config,options);await new Promise(resolve=>h.app.server.listen(0,'127.0.0.1',resolve));

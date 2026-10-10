@@ -31,11 +31,11 @@ test('gold RUSH grants exactly seven simulation seconds of speed and full gamepl
  const limited=flat();limited.player.rush=7;limited.crash('TIME LIMIT');assert(limited.dead,'power cannot bypass server run duration');
 });
 
-test('weekly periods start on Monday UTC, span seven days and keep historical daily IDs separate',()=>{
- const monday=Date.UTC(2026,8,28),week=currentRound(monday);
- assert(week>=WEEK_ID_OFFSET);assert.equal(currentRound(monday+ROUND_MS-1),week);assert.equal(currentRound(monday-1),week-1);
- assert.equal(currentRound(monday+ROUND_MS),week+1);
- assert.deepEqual(roundWindow(week),{start:monday,end:monday+ROUND_MS,period:'weekly'});
+test('weekly periods start on Thursday 06:00 UTC, span seven days and keep historical daily IDs separate',()=>{
+ const thursday=Date.UTC(2026,9,1,6),week=currentRound(thursday);
+ assert(week>=WEEK_ID_OFFSET);assert.equal(currentRound(thursday+ROUND_MS-1),week);assert.equal(currentRound(thursday-1),week-1);
+ assert.equal(currentRound(thursday+ROUND_MS),week+1);
+ assert.deepEqual(roundWindow(week),{start:thursday,end:thursday+ROUND_MS,period:'weekly'});
  assert.deepEqual(roundWindow(20500),{start:20500*DAY_MS,end:20501*DAY_MS,period:'daily'});
 });
 

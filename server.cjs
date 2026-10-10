@@ -223,7 +223,7 @@ function createApp(config,options={}) {
           const round=currentRound(now()),window=roundWindow(round);
           const snapshot=ensureRound(db,round,config);
           const rewards=publicRewards(snapshot,config);
-          json(res,{build:BUILD_ID,engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Monday 00:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
+          json(res,{build:BUILD_ID,engine:ENGINE_VERSION,mint:MINT,minimumTokens:0,holderDailyRuns:HOLDER_DAILY_RUNS,unlimitedPlays:true,entryMode:'free-optional-wallet',walletOptional:true,redQuest:{target:10,maxPerRun:5,bestScoreMultiplier:2,reset:'00:00 UTC'},rushBurstSeconds:7,vault:config.vault,prizesEnabled:rewards.enabled,payoutMode:'manual-review',jackpotTokens:rewards.catoshiPool,rewards,round,previousRound:round-1,period:'weekly',roundMs:ROUND_MS,roundStarts:window.start,roundEnds:window.end,reset:'Thursday 06:00 UTC',maxTicks:MAX_TICKS,serverTime:now(),paidModeEnabled:false});return;
         }
         if(req.method==='GET'&&url.pathname==='/api/trials/leaderboard'){
           const level=Number(url.searchParams.get('level')),course=trialCourse(level);

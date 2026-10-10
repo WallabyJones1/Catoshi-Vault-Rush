@@ -16,7 +16,7 @@ function rewardSettings(env){
   const catoshiPool=amount(env.CATOSHI_WEEKLY_PRIZE_POOL??env.CATOSHI_PRIZE_POOL??env.JACKPOT_TOKENS_PER_ROUND??'100000','CATOSHI_PRIZE_POOL');
   const rushPool=amount(env.RUSH_WEEKLY_PRIZE_POOL??env.RUSH_PRIZE_POOL??'0','RUSH_PRIZE_POOL');
   const splits=env.REWARD_SPLIT?env.REWARD_SPLIT.split(',').map(Number):DEFAULT_SPLIT.slice();
-  if(splits.length!==10||splits.some(n=>!Number.isInteger(n)||n<1)||splits.reduce((a,b)=>a+b,0)!==100)throw Error('REWARD_SPLIT needs ten positive integer percentages totaling 100.');
+  if(splits.length<1||splits.length>10||splits.some(n=>!Number.isInteger(n)||n<1)||splits.reduce((a,b)=>a+b,0)!==100)throw Error('REWARD_SPLIT needs one to ten positive integer percentages totaling 100.');
   if(enabled&&!vault)throw Error('Rewards require a vault public wallet in VAULT_WALLET.');
   if(enabled&&!positive(catoshiPool)&&!positive(rushPool))throw Error('Rewards require a positive prize pool.');
   if(enabled&&positive(rushPool)&&!rushMint)throw Error('Set RUSH_MINT before enabling a RUSH prize pool.');
@@ -44,7 +44,7 @@ function ensureRound(db,id,config,roundMs=DAY_MS){
 }
 function publicRewards(row,config){
   const enabled=config.rewards?.enabled??positive(config.tokens);
-  return {enabled,vault:row.vault,catoshiPool:row.tokens,rushPool:row.rush_tokens,rushMint:row.rush_mint,split:JSON.parse(row.splits),winners:10,round:row.id,period:roundWindow(row.id).period,roundStarts:row.start,roundEnds:row.end,payoutMode:'manual-review',fewerPlayers:'normalize-active-shares'};
+  return {enabled,vault:row.vault,catoshiPool:row.tokens,rushPool:row.rush_tokens,rushMint:row.rush_mint,split:JSON.parse(row.splits),winners:JSON.parse(row.splits).length,round:row.id,period:roundWindow(row.id).period,roundStarts:row.start,roundEnds:row.end,payoutMode:'manual-review',fewerPlayers:'normalize-active-shares'};
 }
 function toRaw(tokens,decimals){
   const [whole,fraction='']=tokens.split('.');
@@ -68,7 +68,7 @@ async function makeTop10Plan(db,roundId,config,dependencies={}){
   if(!row.vault||(!positive(row.tokens)&&!positive(row.rush_tokens)))throw Error('This round had no funded prize budget configured.');
   if(db.prepare('SELECT round FROM payouts WHERE round=?').get(roundId))throw Error('A legacy payout plan already exists for this round; do not pay it twice.');
   const prior=planSummary(db,roundId);if(prior)return prior;
-  const winners=db.prepare(`SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY wallet ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL AND wallet IS NOT NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT 10`).all(roundId);
+  const winners=db.prepare(`SELECT * FROM (SELECT *,ROW_NUMBER() OVER(PARTITION BY wallet ORDER BY score DESC,submitted ASC,id ASC) position FROM runs WHERE mode='holder' AND round=? AND submitted IS NOT NULL AND disqualified IS NULL AND wallet IS NOT NULL) WHERE position=1 ORDER BY score DESC,submitted ASC,id ASC LIMIT ${JSON.parse(row.splits).length}`).all(roundId);
   if(!winners.length)throw Error('No eligible prize runs in this round.');
   if(winners.some(w=>w.wallet===row.vault))throw Error('A winning address is the vault. Review and disqualify that entry before preparing payments.');
   const getBalance=dependencies.balance||((wallet,mint)=>tokenBalance(wallet,[config.rpc,config.rpcFallback].filter(Boolean),undefined,mint));
