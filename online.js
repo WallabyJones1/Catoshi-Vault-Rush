@@ -239,8 +239,13 @@
       $('leaderboard-status').textContent='LIVE · '+new Date(value.updatedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
       $('leaderboard-explainer').textContent='BEST RUN PER PLAYER · '+(round===null?'THIS WEEK':'LAST WEEK');
       const remaining=Math.max(0,value.roundEnds-value.updatedAt);
+      // Read off the round's own end time. The day used to be hardcoded here,
+      // which quietly went wrong the moment the weekly boundary moved.
+      const ends=new Date(value.roundEnds);
+      const closes=ends.toLocaleDateString('en-US',{weekday:'short',timeZone:'UTC'}).toUpperCase()
+        +' '+String(ends.getUTCHours()).padStart(2,'0')+':'+String(ends.getUTCMinutes()).padStart(2,'0')+' UTC';
       $('board-round-time').textContent=round!==null?'CLOSED · UTC'
-        :'RESETS '+Math.floor(remaining/86400000)+'D '+String(Math.floor(remaining/3600000)%24).padStart(2,'0')+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · MON 00:00 UTC';
+        :'RESETS '+Math.floor(remaining/86400000)+'D '+String(Math.floor(remaining/3600000)%24).padStart(2,'0')+'H '+String(Math.floor(remaining/60000)%60).padStart(2,'0')+'M · '+closes;
     }catch(error){if(generation===boardGeneration){$('leaderboard-status').className='status error';$('leaderboard-status').textContent='Could not refresh. '+error.message;}}
   }
   function openBoard(){
