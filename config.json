@@ -1,0 +1,61 @@
+{
+  "_readme": "Catoshi's Catch server settings. Edit this file, then restart the server (npm start). Leave wallet addresses empty until launch; nothing on-chain happens while mode is 'play'.",
+
+  "mode": "play",
+  "_mode": "'play' = $CATOSHI is a play balance kept by the server. 'live' is reserved for the token launch and is not wired to the chain yet.",
+
+  "server": {
+    "port": 8080,
+    "publicUrl": "",
+    "_publicUrl": "The https address players open, e.g. https://catoshi.example.com. Used for the Phantom mobile deep link.",
+    "dataDir": "./data",
+    "adminToken": "change-me-to-a-long-random-string"
+  },
+
+  "token": {
+    "symbol": "CATOSHI",
+    "mint": "HrZh7koZFedTSHng4bVmhULwejpmVdSKUYxaf2N5im1b",
+    "decimals": 6,
+    "rpc": "https://api.mainnet-beta.solana.com"
+  },
+
+  "wallets": {
+    "_wallets": "Public addresses only. Never put a private key in this file.",
+    "dailyPot": "",
+    "weeklyCup": "",
+    "tripFund": "",
+    "house": "",
+    "payout": "",
+    "_payout": "The wallet prizes are paid from once live payouts are switched on."
+  },
+
+  "prices": {
+    "startBalance": 500,
+    "licence": 250,
+    "autoCast": 2,
+    "autoRate": 0.85
+  },
+
+  "splits": {
+    "_splits": "Where each kind of spending goes. Each row must add up to 1.",
+    "licence": { "daily": 0.30, "weekly": 0.50, "trips": 0.10, "house": 0.10 },
+    "shop":    { "daily": 0.30, "weekly": 0.35, "trips": 0.20, "house": 0.15 },
+    "auto":    { "daily": 0.45, "weekly": 0.40, "house": 0.15 },
+    "trip":    { "trips": 0.85, "weekly": 0.05, "house": 0.10 }
+  },
+
+  "payouts": {
+    "dailyPay": 0.70,
+    "weeklyPay": 0.80,
+    "prizeSplit": [30, 20, 14, 10, 8, 6, 4, 3, 3, 2],
+    "tripTarget": 20000
+  },
+
+  "seed": {
+    "_seed": "Catoshi's starting treasury, added once when the server first starts with an empty data folder.",
+    "trips": 20000,
+    "house": 10000,
+    "daily": 2000,
+    "weekly": 5000
+  }
+}

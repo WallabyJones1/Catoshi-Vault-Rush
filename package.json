@@ -1,0 +1,14 @@
+{
+  "name": "catoshis-catch",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Catoshi's Catch: a pixel fishing town where cats fish for Catoshi. Multiplayer server with Phantom sign-in.",
+  "main": "server.js",
+  "scripts": {
+    "build": "python3 build.py",
+    "start": "node server.js",
+    "test": "node test/server.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": { "ws": "^8.18.0" }
+}
